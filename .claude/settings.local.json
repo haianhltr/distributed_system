@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(npm install)",
+      "Bash(chmod:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell:*)",
+      "Bash(node:*)",
+      "Bash(cp:*)",
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(find:*)",
+      "Bash(if [ -z \"$(find . -name \"*.js\" -type f 2>/dev/null)\" ])",
+      "Bash(then echo \"✅ No JavaScript files found - cleanup successful!\")",
+      "Bash(else echo \"❌ JavaScript files still present\")",
+      "Bash(fi)",
+      "Bash(if [ -z \"$(find . -name \"package.json\" -type f 2>/dev/null)\" ])",
+      "Bash(then echo \"✅ No package.json files found - cleanup successful!\")",
+      "Bash(else echo \"❌ package.json files still present\")",
+      "Bash(if [ -z \"$(find . -name \"node_modules\" -type d 2>/dev/null)\" ])",
+      "Bash(then echo \"✅ No node_modules directories found - cleanup successful!\")",
+      "Bash(else echo \"❌ node_modules directories still present\")",
+      "Bash(docker logs:*)",
+      "Bash(grep:*)",
+      "Bash(python test:*)",
+      "Bash(pip install:*)",
+      "Bash(sed:*)",
+      "Bash(python:*)"
+    ],
+    "deny": []
+  }
+}

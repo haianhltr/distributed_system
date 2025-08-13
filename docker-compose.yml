@@ -1,0 +1,120 @@
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=distributed_system
+      - POSTGRES_USER=ds_user
+      - POSTGRES_PASSWORD=ds_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ds_user -d distributed_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+  main-server:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.main-server
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - POPULATE_INTERVAL_MS=600000  # 10 minutes
+      - BATCH_SIZE=5
+      - ADMIN_TOKEN=admin-secret-token
+      - DATABASE_URL=postgresql://ds_user:ds_password@postgres:5432/distributed_system
+    volumes:
+      - datalake-data:/app/datalake/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.dashboard
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - MAIN_SERVER_URL=http://main-server:3001
+      - ADMIN_TOKEN=admin-secret-token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      main-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  bot-1:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.bot
+    environment:
+      - BOT_ID=bot-docker-1
+      - MAIN_SERVER_URL=http://main-server:3001
+      - HEARTBEAT_INTERVAL_MS=30000
+      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - FAILURE_RATE=0.15
+    depends_on:
+      main-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot-2:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.bot
+    environment:
+      - BOT_ID=bot-docker-2
+      - MAIN_SERVER_URL=http://main-server:3001
+      - HEARTBEAT_INTERVAL_MS=30000
+      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - FAILURE_RATE=0.15
+    depends_on:
+      main-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot-3:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.bot
+    environment:
+      - BOT_ID=bot-docker-3
+      - MAIN_SERVER_URL=http://main-server:3001
+      - HEARTBEAT_INTERVAL_MS=30000
+      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - FAILURE_RATE=0.15
+    depends_on:
+      main-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  datalake-data:
+
+networks:
+  default:
+    name: distributed-system

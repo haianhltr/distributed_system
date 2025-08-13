@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <nav class="bg-white shadow">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="/" class="text-xl font-semibold text-gray-900">Bot Details</a>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-gray-600 hover:text-gray-900">← Back to Dashboard</a>
+                        <a href="/bots" class="text-gray-600 hover:text-gray-900">All Bots</a>
+                        <a href="/jobs" class="text-gray-600 hover:text-gray-900">Jobs</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="space-y-6">
+                <!-- Bot Info Card -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-900">{{ bot.id }}</h1>
+                            <p class="text-gray-600 mt-1">Bot Details</p>
+                        </div>
+                        <span class="px-3 py-1 text-sm font-medium rounded-full {{ (bot.computed_status or bot.status) | get_status_badge }}">
+                            {{ bot.computed_status or bot.status }}
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Basic Info -->
+                        <div class="space-y-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Basic Information</h3>
+                            
+                            <div class="space-y-3">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Bot ID:</span>
+                                    <span class="font-mono text-gray-900">{{ bot.id }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="font-medium">{{ bot.computed_status or bot.status }}</span>
+                                </div>
+                                
+                                {% if bot.current_job_id %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Current Job:</span>
+                                    <a href="/jobs/{{ bot.current_job_id }}" class="text-blue-600 hover:underline font-mono">
+                                        {{ bot.current_job_id }}
+                                    </a>
+                                </div>
+                                {% else %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Current Job:</span>
+                                    <span class="text-gray-500">None</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if bot.processing_duration_formatted %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Processing Duration:</span>
+                                    <span class="text-blue-600 font-medium">{{ bot.processing_duration_formatted }}</span>
+                                </div>
+                                {% endif %}
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Last Heartbeat:</span>
+                                    <span class="text-gray-900">{{ bot.last_heartbeat_at or 'Never' }}</span>
+                                </div>
+                                
+                                {% if bot.created_at %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Registered:</span>
+                                    <span class="text-gray-900">{{ bot.created_at }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Performance Stats -->
+                        <div class="space-y-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Performance (Last 24h)</h3>
+                            
+                            <div class="space-y-3">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Total Jobs:</span>
+                                    <span class="font-semibold">{{ stats.total_jobs | format_number }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Succeeded:</span>
+                                    <span class="font-semibold text-green-600">{{ stats.succeeded | format_number }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Failed:</span>
+                                    <span class="font-semibold text-red-600">{{ stats.failed | format_number }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Success Rate:</span>
+                                    <span class="font-medium">{{ "%.1f" | format(stats.success_rate) }}%</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Avg Duration:</span>
+                                    <span class="font-medium">{{ "%.1f" | format(stats.avg_duration_ms / 1000) }}s</span>
+                                </div>
+                                
+                                {% if stats.min_duration_ms > 0 %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Min Duration:</span>
+                                    <span class="font-medium text-green-600">{{ "%.1f" | format(stats.min_duration_ms / 1000) }}s</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if stats.max_duration_ms > 0 %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Max Duration:</span>
+                                    <span class="font-medium text-orange-600">{{ "%.1f" | format(stats.max_duration_ms / 1000) }}s</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-200 flex space-x-4">
+                        <button onclick="deleteBot('{{ bot.id }}')" 
+                                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                            Delete Bot
+                        </button>
+                        <button onclick="window.location.reload()" 
+                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Performance Charts -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-6">Performance History (Last 24 Hours)</h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Success/Failure Chart -->
+                        <div>
+                            <h4 class="text-md font-medium text-gray-700 mb-4">Success Rate by Hour</h4>
+                            <div class="relative h-64">
+                                <canvas id="successRateChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Processing Duration Chart -->
+                        <div>
+                            <h4 class="text-md font-medium text-gray-700 mb-4">Average Processing Duration</h4>
+                            <div class="relative h-64">
+                                <canvas id="durationChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Jobs History -->
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">Recent Job History</h3>
+                        <p class="text-sm text-gray-600 mt-1">Last 50 jobs processed by {{ bot.id }}</p>
+                    </div>
+                    
+                    {% if stats.recent_jobs and stats.recent_jobs|length > 0 %}
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Processed At</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for job in stats.recent_jobs %}
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span class="font-mono text-sm text-gray-900">{{ job.job_id[:8] }}...</span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.status | get_status_badge }}">
+                                            {{ job.status }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ job.duration_formatted or '-' }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ job.processed_at[:19] if job.processed_at else '-' }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600">
+                                        {{ job.error or '-' }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-6 text-center text-gray-500">
+                        <p>No job history available for this bot.</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Current Jobs -->
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">Current Jobs</h3>
+                        <p class="text-sm text-gray-600 mt-1">Jobs currently assigned to {{ bot.id }}</p>
+                    </div>
+                    
+                    {% if currentJobs|length == 0 %}
+                    <div class="p-6 text-center text-gray-500">
+                        <p>No jobs currently assigned to this bot.</p>
+                    </div>
+                    {% else %}
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Result</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Finished</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for job in currentJobs %}
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <a href="/jobs/{{ job.id }}" class="text-blue-600 hover:underline font-mono">
+                                            {{ job.id[:8] }}...
+                                        </a>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ job.a }} + {{ job.b }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.status | get_status_badge }}">
+                                            {{ job.status }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {% if job.status == 'succeeded' %}
+                                            <span class="text-green-600 font-semibold">{{ job.result or (job.a + job.b) }}</span>
+                                        {% elif job.status == 'failed' %}
+                                            <span class="text-red-600">{{ job.error or 'Error' }}</span>
+                                        {% else %}
+                                            <span class="text-gray-400">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ job.started_at or '-' }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ job.finished_at or '-' }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    async function deleteBot(botId) {
+        if (!confirm(`Are you sure you want to delete bot ${botId}?`)) return;
+        
+        try {
+            const response = await fetch(`/bots/${botId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Bot deleted successfully!');
+                window.location.href = '/bots';
+            } else {
+                const error = await response.json();
+                alert('Failed to delete bot: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Initialize performance charts
+    document.addEventListener('DOMContentLoaded', function() {
+        const hourlyPerformance = {{ stats.hourly_performance | tojson | safe }};
+        
+        // Prepare data for charts
+        const hours = hourlyPerformance.map(h => new Date(h.hour).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})).reverse();
+        const successRates = hourlyPerformance.map(h => h.success_rate).reverse();
+        const totalJobs = hourlyPerformance.map(h => h.total).reverse();
+        const durations = hourlyPerformance.map(h => h.avg_duration_ms / 1000).reverse(); // Convert to seconds
+        
+        // Success Rate Chart
+        const successRateCtx = document.getElementById('successRateChart').getContext('2d');
+        new Chart(successRateCtx, {
+            type: 'line',
+            data: {
+                labels: hours,
+                datasets: [
+                    {
+                        label: 'Success Rate (%)',
+                        data: successRates,
+                        borderColor: 'rgb(34, 197, 94)',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Total Jobs',
+                        data: totalJobs,
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Hour'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Success Rate (%)'
+                        },
+                        min: 0,
+                        max: 100
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Total Jobs'
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    title: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
+        // Duration Chart
+        const durationCtx = document.getElementById('durationChart').getContext('2d');
+        new Chart(durationCtx, {
+            type: 'bar',
+            data: {
+                labels: hours,
+                datasets: [{
+                    label: 'Avg Duration (seconds)',
+                    data: durations,
+                    backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                    borderColor: 'rgb(249, 115, 22)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Hour'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Duration (seconds)'
+                        },
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    title: {
+                        display: false
+                    }
+                }
+            }
+        });
+    });
+    </script>
+</body>
+</html>

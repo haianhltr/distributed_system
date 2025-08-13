@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <nav class="bg-white shadow">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="/" class="text-xl font-semibold text-gray-900">Job Details</a>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-gray-600 hover:text-gray-900">← Back to Dashboard</a>
+                        <a href="/bots" class="text-gray-600 hover:text-gray-900">Bots</a>
+                        <a href="/jobs" class="text-gray-600 hover:text-gray-900">All Jobs</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="space-y-6">
+                <!-- Job Info Card -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-900">Job {{ job.id[:12] }}...</h1>
+                            <p class="text-gray-600 mt-1">Job Details and Execution History</p>
+                        </div>
+                        <span class="px-3 py-1 text-sm font-medium rounded-full {{ job.status | get_status_badge }}">
+                            {{ job.status }}
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Basic Info -->
+                        <div class="space-y-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Job Information</h3>
+                            
+                            <div class="space-y-3">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Job ID:</span>
+                                    <span class="font-mono text-gray-900">{{ job.id }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="font-medium">{{ job.status }}</span>
+                                </div>
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Task:</span>
+                                    <span class="font-semibold text-lg">{{ job.a }} + {{ job.b }}</span>
+                                </div>
+                                
+                                {% if job.result is defined %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Result:</span>
+                                    {% if job.status == 'succeeded' %}
+                                        <span class="font-bold text-green-600 text-lg">{{ job.result or (job.a + job.b) }}</span>
+                                    {% else %}
+                                        <span class="text-gray-500">-</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Created:</span>
+                                    <span class="text-gray-900">{{ job.created_at }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Execution Details -->
+                        <div class="space-y-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Execution Details</h3>
+                            
+                            <div class="space-y-3">
+                                {% if job.claimed_by %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Assigned Bot:</span>
+                                    <a href="/bots/{{ job.claimed_by }}" class="text-blue-600 hover:underline font-mono">
+                                        {{ job.claimed_by[:12] }}...
+                                    </a>
+                                </div>
+                                {% else %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Assigned Bot:</span>
+                                    <span class="text-gray-500">Unassigned</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if job.started_at %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Started:</span>
+                                    <span class="text-gray-900">{{ job.started_at }}</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if job.finished_at %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Finished:</span>
+                                    <span class="text-gray-900">{{ job.finished_at }}</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if job.started_at and job.finished_at %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Duration:</span>
+                                    <span class="text-gray-900">{{ job.duration or 'Calculating...' }}</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if job.error %}
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Error:</span>
+                                    <span class="text-red-600 text-xs break-all">{{ job.error }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-200 flex space-x-4">
+                        <button onclick="window.location.reload()" 
+                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                            Refresh
+                        </button>
+                        {% if job.status == 'pending' %}
+                        <button onclick="retryJob('{{ job.id }}')" 
+                                class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                            Retry Job
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Job Timeline -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Job Timeline</h3>
+                    
+                    <div class="relative">
+                        <!-- Timeline line -->
+                        <div class="absolute left-4 top-0 h-full w-0.5 bg-gray-200"></div>
+                        
+                        <!-- Timeline events -->
+                        <div class="space-y-6">
+                            <!-- Created -->
+                            <div class="flex items-start">
+                                <div class="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </div>
+                                <div class="ml-4">
+                                    <h4 class="text-sm font-semibold text-gray-900">Job Created</h4>
+                                    <p class="text-sm text-gray-600">{{ job.created_at }}</p>
+                                    <p class="text-xs text-gray-500">Task: {{ job.a }} + {{ job.b }}</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Claimed -->
+                            {% if job.claimed_by and job.started_at %}
+                            <div class="flex items-start">
+                                <div class="flex-shrink-0 w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center">
+                                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </div>
+                                <div class="ml-4">
+                                    <h4 class="text-sm font-semibold text-gray-900">Job Started</h4>
+                                    <p class="text-sm text-gray-600">{{ job.started_at }}</p>
+                                    <p class="text-xs text-gray-500">Assigned to bot: {{ job.claimed_by[:12] }}...</p>
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Finished -->
+                            {% if job.finished_at %}
+                            <div class="flex items-start">
+                                <div class="flex-shrink-0 w-8 h-8 {% if job.status == 'succeeded' %}bg-green-500{% else %}bg-red-500{% endif %} rounded-full flex items-center justify-center">
+                                    {% if job.status == 'succeeded' %}
+                                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    {% else %}
+                                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    {% endif %}
+                                </div>
+                                <div class="ml-4">
+                                    <h4 class="text-sm font-semibold text-gray-900">Job {{ job.status|title }}</h4>
+                                    <p class="text-sm text-gray-600">{{ job.finished_at }}</p>
+                                    {% if job.status == 'succeeded' %}
+                                        <p class="text-xs text-green-600">Result: {{ job.result or (job.a + job.b) }}</p>
+                                    {% elif job.error %}
+                                        <p class="text-xs text-red-600">Error: {{ job.error }}</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Raw Job Data -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Raw Job Data</h3>
+                    <pre class="bg-gray-100 p-4 rounded text-sm overflow-x-auto"><code>{{ job | tojson(indent=2) }}</code></pre>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    async function retryJob(jobId) {
+        if (!confirm(`Are you sure you want to retry job ${jobId}?`)) return;
+        
+        try {
+            // Note: This would need to be implemented on the backend
+            alert('Retry functionality not yet implemented');
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+    </script>
+</body>
+</html>

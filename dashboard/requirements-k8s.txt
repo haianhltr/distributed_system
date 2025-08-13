@@ -1,0 +1,5 @@
+# Additional requirements for Kubernetes scaling support
+# Install with: pip install -r requirements-k8s.txt
+
+kubernetes>=29.0.0
+pyyaml>=6.0

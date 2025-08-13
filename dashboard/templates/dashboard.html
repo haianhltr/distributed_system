@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <nav class="bg-white shadow">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <h1 class="text-xl font-semibold text-gray-900">{{ title }}</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/bots" class="text-gray-600 hover:text-gray-900">Bots</a>
+                        <a href="/jobs" class="text-gray-600 hover:text-gray-900">Jobs</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="space-y-6">
+                <!-- Header -->
+                <div class="flex justify-between items-center">
+                    <h1 class="text-3xl font-bold text-gray-900">System Overview</h1>
+                    <div class="flex space-x-2">
+                        <button onclick="populateJobs()" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-sm">
+                            Populate Jobs
+                        </button>
+                        <button onclick="spawnBot()" class="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 text-sm">
+                            Add Bot
+                        </button>
+                        <button onclick="cleanupBots()" class="bg-orange-600 text-white px-3 py-2 rounded hover:bg-orange-700 text-sm">
+                            Cleanup Dead Bots
+                        </button>
+                        <button onclick="resetBots()" class="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm">
+                            Reset Bots
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Metrics Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <!-- Jobs Overview -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Jobs</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Pending:</span>
+                                <span class="font-semibold">{{ metrics.jobs.get('pending', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Processing:</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.jobs.get('processing', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Succeeded:</span>
+                                <span class="font-semibold text-green-600">{{ metrics.jobs.get('succeeded', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Failed:</span>
+                                <span class="font-semibold text-red-600">{{ metrics.jobs.get('failed', 0) | format_number }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bots Overview -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Bots</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Total:</span>
+                                <span class="font-semibold">{{ metrics.bots.get('total', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Active:</span>
+                                <span class="font-semibold text-green-600">{{ (metrics.bots.get('idle', 0) + metrics.bots.get('busy', 0)) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Busy:</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.bots.get('busy', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Down:</span>
+                                <span class="font-semibold text-red-600">{{ metrics.bots.get('down', 0) | format_number }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Throughput -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Performance</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Completed (1h):</span>
+                                <span class="font-semibold">{{ metrics.throughput.get('completed_last_hour', 0) | format_number }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Rate/hour:</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.throughput.get('completed_last_hour', 0) | format_number }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- System Status -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Status</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center">
+                                <div class="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                                <span class="text-gray-600">System Healthy</span>
+                            </div>
+                            <div class="text-sm text-gray-500">
+                                Last updated: <span id="current-time"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Active Bots -->
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">Active Bots</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bot ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Job</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Processing Duration</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Heartbeat</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% if bots|length == 0 %}
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">No bots registered</td>
+                                    </tr>
+                                {% else %}
+                                    {% for bot in bots %}
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <a href="/bots/{{ bot.id }}" class="text-blue-600 hover:underline">
+                                                {{ bot.id }}
+                                            </a>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full {{ (bot.computed_status or bot.status) | get_status_badge }}">
+                                                {{ bot.computed_status or bot.status }}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {% if bot.current_job_id %}
+                                                <a href="/jobs/{{ bot.current_job_id }}" class="text-blue-600 hover:underline">
+                                                    {{ bot.current_job_id[:8] }}...
+                                                </a>
+                                            {% else %}
+                                                <span class="text-gray-500">None</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {% if bot.processing_duration_formatted %}
+                                                <span class="text-blue-600 font-medium">{{ bot.processing_duration_formatted }}</span>
+                                            {% else %}
+                                                <span class="text-gray-400">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {{ bot.last_heartbeat_at }}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button onclick="deleteBot('{{ bot.id }}')" 
+                                                    class="text-red-600 hover:text-red-900">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Current Jobs Status -->
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                        <h3 class="text-lg font-semibold text-gray-900">Current Jobs Status</h3>
+                        <div class="flex space-x-4">
+                            <button onclick="refreshJobs()" class="text-blue-600 hover:text-blue-800">
+                                🔄 Refresh
+                            </button>
+                            <a href="/jobs" class="text-blue-600 hover:underline">View All</a>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <!-- Status Filter Tabs -->
+                        <div class="flex space-x-1 mb-4">
+                            <button onclick="filterJobs('all')" id="filter-all" class="px-3 py-1 rounded text-sm bg-blue-100 text-blue-800">All</button>
+                            <button onclick="filterJobs('pending')" id="filter-pending" class="px-3 py-1 rounded text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Pending</button>
+                            <button onclick="filterJobs('processing')" id="filter-processing" class="px-3 py-1 rounded text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Processing</button>
+                            <button onclick="filterJobs('succeeded')" id="filter-succeeded" class="px-3 py-1 rounded text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Completed</button>
+                            <button onclick="filterJobs('failed')" id="filter-failed" class="px-3 py-1 rounded text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Failed</button>
+                        </div>
+                        
+                        <!-- Jobs Grid -->
+                        <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto">
+                            {% for job in allJobs %}
+                            <div class="job-card border rounded-lg p-4 hover:shadow-md transition-shadow" data-status="{{ job.status }}">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div class="text-sm font-mono text-gray-500">
+                                        #{{ job.id[:8] }}
+                                    </div>
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.status | get_status_badge }}">
+                                        {{ job.status }}
+                                    </span>
+                                </div>
+                                
+                                <div class="text-lg font-semibold text-gray-900 mb-2">
+                                    {{ job.a }} + {{ job.b }} = 
+                                    {% if job.status == 'succeeded' %}
+                                        <span class="text-green-600">{{ job.a + job.b }}</span>
+                                    {% elif job.status == 'failed' %}
+                                        <span class="text-red-600">Error</span>
+                                    {% else %}
+                                        <span class="text-gray-400">...</span>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="text-sm text-gray-600 space-y-1">
+                                    {% if job.claimed_by %}
+                                    <div>Bot: <span class="font-medium">{{ job.claimed_by[:12] }}</span></div>
+                                    {% endif %}
+                                    
+                                    {% if job.started_at and job.status == 'processing' %}
+                                    <div>Started: <span class="text-blue-600">{{ job.started_at }}</span></div>
+                                    {% elif job.finished_at %}
+                                    <div>Finished: <span class="text-gray-500">{{ job.finished_at }}</span></div>
+                                    {% else %}
+                                    <div>Created: <span class="text-gray-500">{{ job.created_at }}</span></div>
+                                    {% endif %}
+                                    
+                                    {% if job.error %}
+                                    <div class="text-red-600 text-xs">Error: {{ job.error }}</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        {% if allJobs|length == 0 %}
+                        <div class="text-center py-8 text-gray-500">
+                            No jobs found. Click "Populate Jobs" to create some!
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Recent Jobs Summary -->
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                        <h3 class="text-lg font-semibold text-gray-900">Recent Activity</h3>
+                        <a href="/jobs" class="text-blue-600 hover:underline">View All</a>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Numbers</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bot</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for job in recentJobs %}
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <a href="/jobs/{{ job.id }}" class="text-blue-600 hover:underline">
+                                            {{ job.id[:8] }}...
+                                        </a>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ job.a }} + {{ job.b }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.status | get_status_badge }}">
+                                            {{ job.status }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {% if job.claimed_by %}
+                                            <a href="/bots/{{ job.claimed_by }}" class="text-blue-600 hover:underline">
+                                                {{ job.claimed_by[:8] }}...
+                                            </a>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ job.created_at }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    async function populateJobs() {
+        const batchSize = prompt('How many jobs to create?', '5');
+        if (!batchSize) return;
+        
+        try {
+            const response = await fetch('/jobs/populate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batchSize: parseInt(batchSize) })
+            });
+            
+            if (response.ok) {
+                alert('Jobs created successfully!');
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to create jobs: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function spawnBot() {
+        const count = prompt('How many bots to spawn?', '1');
+        if (!count) return;
+        
+        try {
+            const response = await fetch('/scale/up', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: parseInt(count) })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert(`Successfully spawned ${result.spawned} bot(s)!`);
+                } else if (result.status === 'partial') {
+                    alert(`Partially successful: spawned ${result.spawned} bot(s), but ${result.failed?.length || 0} failed.\nFailures: ${result.failed?.join(', ') || 'Unknown'}`);
+                }
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                const error = await response.json();
+                alert('Failed to spawn bots: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function deleteBot(botId) {
+        if (!confirm(`Are you sure you want to delete bot ${botId}?`)) return;
+        
+        try {
+            const response = await fetch(`/bots/${botId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Bot deleted successfully!');
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to delete bot: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function cleanupBots() {
+        if (!confirm('Are you sure you want to cleanup dead bots (inactive for 10+ minutes)?')) return;
+        
+        try {
+            const response = await fetch('/bots/cleanup', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Cleaned up ${result.cleaned_up} dead bots!`);
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to cleanup bots: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function resetBots() {
+        if (!confirm('Are you sure you want to reset all bot states? This will clear orphaned job assignments.')) return;
+        
+        try {
+            const response = await fetch('/bots/reset', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Reset ${result.reset_bots} bots successfully!`);
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to reset bots: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Jobs filtering and refresh functionality
+    function filterJobs(status) {
+        const cards = document.querySelectorAll('.job-card');
+        const buttons = document.querySelectorAll('[id^="filter-"]');
+        
+        // Update button styles
+        buttons.forEach(btn => {
+            btn.className = 'px-3 py-1 rounded text-sm bg-gray-100 text-gray-600 hover:bg-gray-200';
+        });
+        document.getElementById(`filter-${status}`).className = 'px-3 py-1 rounded text-sm bg-blue-100 text-blue-800';
+        
+        // Filter cards
+        cards.forEach(card => {
+            if (status === 'all' || card.dataset.status === status) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    async function refreshJobs() {
+        try {
+            const response = await fetch('/api/metrics');
+            if (response.ok) {
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error('Refresh failed:', error);
+            window.location.reload();
+        }
+    }
+
+    // Update current time
+    function updateCurrentTime() {
+        const now = new Date();
+        document.getElementById('current-time').textContent = now.toLocaleString();
+    }
+    
+    // Update time immediately and then every second
+    updateCurrentTime();
+    setInterval(updateCurrentTime, 1000);
+    
+    // Auto-refresh jobs every 10 seconds
+    setInterval(refreshJobs, 10000);
+    </script>
+</body>
+</html>

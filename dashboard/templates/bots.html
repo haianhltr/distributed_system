@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <nav class="bg-white shadow">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="/" class="text-xl font-semibold text-gray-900">{{ title }}</a>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-gray-600 hover:text-gray-900">Dashboard</a>
+                        <a href="/bots" class="text-blue-600">Bots</a>
+                        <a href="/jobs" class="text-gray-600 hover:text-gray-900">Jobs</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="space-y-6">
+                <!-- Header -->
+                <div class="flex justify-between items-center">
+                    <h1 class="text-3xl font-bold text-gray-900">Bot Management</h1>
+                    <button onclick="spawnBot()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                        Add Bot
+                    </button>
+                </div>
+
+                <!-- Bots Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {% if bots|length == 0 %}
+                        <div class="col-span-full text-center py-12 text-gray-500">
+                            <h3 class="text-lg font-medium">No bots registered</h3>
+                            <p class="mt-2">Click "Add Bot" to spawn a new bot</p>
+                        </div>
+                    {% else %}
+                        {% for bot in bots %}
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div class="flex justify-between items-start mb-4">
+                                <h3 class="text-lg font-semibold text-gray-900">
+                                    <a href="/bots/{{ bot.id }}" class="text-blue-600 hover:underline">
+                                        Bot {{ bot.id[:8] }}...
+                                    </a>
+                                </h3>
+                                <span class="px-2 py-1 text-xs font-medium rounded-full {{ (bot.computed_status or bot.status) | get_status_badge }}">
+                                    {{ bot.computed_status or bot.status }}
+                                </span>
+                            </div>
+                            
+                            <div class="space-y-3">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="font-medium">{{ bot.computed_status or bot.status }}</span>
+                                </div>
+                                
+                                {% if bot.current_job_id %}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-600">Current Job:</span>
+                                    <a href="/jobs/{{ bot.current_job_id }}" class="text-blue-600 hover:underline font-mono">
+                                        {{ bot.current_job_id[:8] }}...
+                                    </a>
+                                </div>
+                                {% endif %}
+                                
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-600">Last Heartbeat:</span>
+                                    <span class="text-gray-500">{{ bot.last_heartbeat_at }}</span>
+                                </div>
+                                
+                                {% if bot.registered_at %}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-600">Registered:</span>
+                                    <span class="text-gray-500">{{ bot.registered_at }}</span>
+                                </div>
+                                {% endif %}
+                                
+                                <div class="pt-4 border-t border-gray-200">
+                                    <button onclick="deleteBot('{{ bot.id }}')" 
+                                            class="w-full bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                                        Delete Bot
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    async function spawnBot() {
+        const count = prompt('How many bots to spawn?', '1');
+        if (!count) return;
+        
+        try {
+            const response = await fetch('/scale/up', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: parseInt(count) })
+            });
+            
+            if (response.ok) {
+                alert('Bots spawned successfully!');
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                const error = await response.json();
+                alert('Failed to spawn bots: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function deleteBot(botId) {
+        if (!confirm(`Are you sure you want to delete bot ${botId}?`)) return;
+        
+        try {
+            const response = await fetch(`/bots/${botId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Bot deleted successfully!');
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to delete bot: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+    </script>
+</body>
+</html>

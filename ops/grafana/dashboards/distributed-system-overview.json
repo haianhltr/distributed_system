@@ -1,0 +1,190 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Distributed System Overview",
+    "description": "Overview of distributed job processing system",
+    "tags": ["distributed-system", "jobs", "bots"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Job Creation Rate",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(jobs_created_total[5m])",
+            "legendFormat": "Jobs/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "color": {"mode": "palette-classic"},
+            "custom": {"displayMode": "basic"}
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Active Bots",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "bots_active_total",
+            "legendFormat": "Active Bots",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "palette-classic"},
+            "custom": {"displayMode": "basic"}
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Pending Jobs",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "jobs_pending_total",
+            "legendFormat": "Pending",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "palette-classic"},
+            "custom": {"displayMode": "basic"}
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Job Completion Rate",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(jobs_completed_total[5m])",
+            "legendFormat": "Completed/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "color": {"mode": "palette-classic"},
+            "custom": {"displayMode": "basic"}
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Job Processing Duration",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, jobs_processing_duration_seconds_bucket)",
+            "legendFormat": "50th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, jobs_processing_duration_seconds_bucket)",
+            "legendFormat": "95th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, jobs_processing_duration_seconds_bucket)",
+            "legendFormat": "99th percentile",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {"drawStyle": "line", "lineInterpolation": "linear"}
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Job Status Distribution",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "jobs_completed_total",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {"displayLabels": ["name", "value", "percent"]}
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "API Request Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "rate(api_requests_total[5m])",
+            "legendFormat": "{{method}} {{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {"drawStyle": "line", "lineInterpolation": "linear"}
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "System Health",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "up",
+            "legendFormat": "{{job}}",
+            "refId": "A"
+          },
+          {
+            "expr": "bots_active_total",
+            "legendFormat": "Active Bots",
+            "refId": "B"
+          },
+          {
+            "expr": "jobs_pending_total",
+            "legendFormat": "Pending Jobs",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {"displayMode": "basic"}
+          }
+        }
+      }
+    ]
+  }
+}
