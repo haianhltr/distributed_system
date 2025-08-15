@@ -28,7 +28,10 @@
       "Bash(python test:*)",
       "Bash(pip install:*)",
       "Bash(sed:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker port:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

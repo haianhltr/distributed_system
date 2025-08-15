@@ -121,12 +121,46 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Cleanup Status -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                            <a href="/cleanup" class="hover:text-blue-600">Cleanup Service</a>
+                        </h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Status:</span>
+                                <span id="cleanup-status" class="font-semibold">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Retention:</span>
+                                <span id="cleanup-retention" class="font-semibold">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Next Run:</span>
+                                <span id="cleanup-next" class="text-sm">-</span>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/cleanup" class="text-sm text-blue-600 hover:text-blue-800">
+                                    Manage Cleanup →
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Active Bots -->
                 <div class="bg-white rounded-lg shadow">
                     <div class="px-6 py-4 border-b border-gray-200">
-                        <h3 class="text-lg font-semibold text-gray-900">Active Bots</h3>
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-lg font-semibold text-gray-900">All Bots</h3>
+                            <div class="flex space-x-2">
+                                <button onclick="filterBots('all')" id="filter-all" class="px-3 py-1 text-sm rounded bg-blue-100 text-blue-800">All</button>
+                                <button onclick="filterBots('active')" id="filter-active" class="px-3 py-1 text-sm rounded bg-gray-100 text-gray-700">Active</button>
+                                <button onclick="filterBots('stale')" id="filter-stale" class="px-3 py-1 text-sm rounded bg-gray-100 text-gray-700">Stale</button>
+                                <button onclick="filterBots('deleted')" id="filter-deleted" class="px-3 py-1 text-sm rounded bg-gray-100 text-gray-700">Deleted</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
@@ -134,20 +168,21 @@
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bot ID</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lifecycle</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Job</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Processing Duration</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Heartbeat</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Activity</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                 {% if bots|length == 0 %}
                                     <tr>
-                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">No bots registered</td>
+                                        <td colspan="7" class="px-6 py-4 text-center text-gray-500">No bots registered</td>
                                     </tr>
                                 {% else %}
                                     {% for bot in bots %}
-                                    <tr>
+                                    <tr class="bot-row {% if bot.lifecycle_status == 'deleted' %}bg-gray-50 opacity-75{% elif bot.lifecycle_status == 'stale' %}bg-yellow-50{% endif %}" data-lifecycle="{{ bot.lifecycle_status }}">
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <a href="/bots/{{ bot.id }}" class="text-blue-600 hover:underline">
                                                 {{ bot.id }}
@@ -156,6 +191,15 @@
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span class="px-2 py-1 text-xs font-medium rounded-full {{ (bot.computed_status or bot.status) | get_status_badge }}">
                                                 {{ bot.computed_status or bot.status }}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full 
+                                                {% if bot.lifecycle_status == 'active' %}bg-green-100 text-green-800
+                                                {% elif bot.lifecycle_status == 'stale' %}bg-yellow-100 text-yellow-800
+                                                {% elif bot.lifecycle_status == 'deleted' %}bg-gray-100 text-gray-800
+                                                {% endif %}">
+                                                {{ bot.lifecycle_status }}
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -175,13 +219,31 @@
                                             {% endif %}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {{ bot.last_heartbeat_at }}
+                                            {% if bot.lifecycle_status == 'deleted' and bot.deleted_age_formatted %}
+                                                <span class="text-gray-500">Deleted {{ bot.deleted_age_formatted }}</span>
+                                            {% elif bot.heartbeat_age_formatted %}
+                                                <span class="{% if bot.lifecycle_status == 'stale' %}text-yellow-600{% else %}text-gray-600{% endif %}">
+                                                    {{ bot.heartbeat_age_formatted }}
+                                                </span>
+                                            {% else %}
+                                                <span class="text-gray-400">Never</span>
+                                            {% endif %}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button onclick="deleteBot('{{ bot.id }}')" 
-                                                    class="text-red-600 hover:text-red-900">
-                                                Delete
-                                            </button>
+                                            {% if bot.lifecycle_status == 'deleted' %}
+                                                <span class="text-gray-400">-</span>
+                                            {% else %}
+                                                <button onclick="deleteBot('{{ bot.id }}')" 
+                                                        class="text-red-600 hover:text-red-900 mr-2">
+                                                    Delete
+                                                </button>
+                                                {% if bot.lifecycle_status == 'stale' or bot.current_job_id %}
+                                                <button onclick="resetBot('{{ bot.id }}')" 
+                                                        class="text-blue-600 hover:text-blue-900">
+                                                    Reset
+                                                </button>
+                                                {% endif %}
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -479,6 +541,88 @@
     
     // Auto-refresh jobs every 10 seconds
     setInterval(refreshJobs, 10000);
+    
+    // Fetch and update cleanup status
+    async function updateCleanupStatus() {
+        try {
+            const response = await fetch('/api/cleanup/status');
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Update status
+                const statusEl = document.getElementById('cleanup-status');
+                if (data.service_running) {
+                    statusEl.textContent = 'Running';
+                    statusEl.className = 'font-semibold text-green-600';
+                } else {
+                    statusEl.textContent = 'Stopped';
+                    statusEl.className = 'font-semibold text-red-600';
+                }
+                
+                // Update retention
+                document.getElementById('cleanup-retention').textContent = 
+                    data.config?.bot_retention_days ? `${data.config.bot_retention_days} days` : '-';
+                
+                // Update next run
+                const intervalHours = data.config?.cleanup_interval_hours || 6;
+                document.getElementById('cleanup-next').textContent = `Every ${intervalHours} hours`;
+            }
+        } catch (error) {
+            console.error('Failed to fetch cleanup status:', error);
+            document.getElementById('cleanup-status').textContent = 'Error';
+            document.getElementById('cleanup-status').className = 'font-semibold text-gray-500';
+        }
+    }
+    
+    // Update cleanup status on load and periodically
+    updateCleanupStatus();
+    setInterval(updateCleanupStatus, 30000); // Every 30 seconds
+    
+    // Reset bot function
+    async function resetBot(botId) {
+        if (!confirm(`Are you sure you want to reset bot ${botId}? This will clear any stale job assignments.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/bots/${botId}/reset`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                alert(`Bot ${botId} has been reset successfully.`);
+                location.reload(); // Refresh the page to show updated status
+            } else {
+                const error = await response.text();
+                alert(`Failed to reset bot: ${error}`);
+            }
+        } catch (error) {
+            console.error('Reset bot error:', error);
+            alert('Failed to reset bot: Network error');
+        }
+    }
+    
+    // Bot filtering function
+    function filterBots(filterType) {
+        const rows = document.querySelectorAll('.bot-row');
+        const buttons = document.querySelectorAll('[id^="filter-"]');
+        
+        // Update button styles
+        buttons.forEach(btn => {
+            btn.className = 'px-3 py-1 text-sm rounded bg-gray-100 text-gray-700';
+        });
+        document.getElementById(`filter-${filterType}`).className = 'px-3 py-1 text-sm rounded bg-blue-100 text-blue-800';
+        
+        // Filter rows
+        rows.forEach(row => {
+            const lifecycle = row.dataset.lifecycle;
+            if (filterType === 'all' || lifecycle === filterType) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
     </script>
 </body>
 </html>

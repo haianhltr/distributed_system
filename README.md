@@ -1,6 +1,6 @@
 # Distributed Job Processing System
 
-A distributed system for processing computational jobs with multiple worker bots, built with **Python FastAPI** and SQLite.
+A distributed system for processing computational jobs with multiple worker bots, built with **Python FastAPI** and PostgreSQL. Features automatic resource cleanup and comprehensive monitoring.
 
 ## Architecture
 
@@ -8,17 +8,19 @@ A distributed system for processing computational jobs with multiple worker bots
 - **Bots**: Worker processes that claim and process one job at a time
 - **Dashboard**: Web UI for monitoring and controlling the system
 - **Datalake**: Append-only storage for all job results
-- **State**: Centralized database for job and bot coordination
+- **State**: Centralized PostgreSQL database for job and bot coordination
+- **Cleanup Service**: Automated resource management and orphaned data cleanup
 
 ## Technology Stack
 
 - **Backend**: Python 3.11 + FastAPI
-- **Database**: SQLite with ACID transactions
+- **Database**: PostgreSQL with ACID transactions
 - **Storage**: NDJSON files (date-partitioned)
-- **Frontend**: Jinja2 templates + Tailwind CSS
+- **Frontend**: Jinja2 templates + Tailwind CSS + Alpine.js
 - **HTTP Client**: aiohttp for async operations
 - **Deployment**: Docker Compose
 - **Type Safety**: Pydantic models with validation
+- **Monitoring**: Structured logging with cleanup tracking
 
 ## Quick Start
 
@@ -52,6 +54,7 @@ This starts the complete system:
 - **Dashboard:** http://localhost:3002
 - **API:** http://localhost:3001
 - **Health Check:** http://localhost:3001/healthz
+- **Cleanup Management:** http://localhost:3002/cleanup
 
 ### 🛠️ Management Commands
 
@@ -127,18 +130,25 @@ cd bots && npm run dev
 - `GET /datalake/stats` - Datalake statistics
 - `GET /datalake/export/:date` - Export results for date
 
-### Dashboard (Port 3000)
+#### Cleanup (Admin)
+- `GET /admin/cleanup/status` - Cleanup service status and history
+- `POST /admin/cleanup` - Trigger cleanup (with dry_run parameter)
+- `POST /admin/query` - Execute safe database queries
+
+### Dashboard (Port 3002)
 
 - `/` - Main overview
 - `/bots` - Bot management
 - `/bots/:id` - Bot details
 - `/jobs` - Job listing
 - `/jobs/:id` - Job details
+- `/cleanup` - Resource cleanup management
 
 ## Configuration
 
-Environment variables (see `ops/.env.example`):
+Environment variables (see `docker-compose.yml`):
 
+**Core System:**
 - `POPULATE_INTERVAL_MS` - Job creation interval (default: 10 minutes)
 - `BATCH_SIZE` - Jobs per batch (default: 5)
 - `PROCESSING_DURATION_MS` - Job processing time (default: 5 minutes)
@@ -146,12 +156,18 @@ Environment variables (see `ops/.env.example`):
 - `HEARTBEAT_INTERVAL_MS` - Bot heartbeat interval (default: 30 seconds)
 - `ADMIN_TOKEN` - Admin API token (default: admin-secret-token)
 
+**Cleanup System:**
+- `BOT_RETENTION_DAYS` - Days to keep deleted bot records (default: 7)
+- `CLEANUP_INTERVAL_HOURS` - Hours between cleanup runs (default: 6)
+- `CONTAINER_CLEANUP_ENABLED` - Enable Docker container cleanup (default: true)
+- `CLEANUP_DRY_RUN` - Run in preview mode only (default: false)
+
 ## Data Storage
 
-### Database (SQLite)
-- Jobs table: job state and metadata
-- Bots table: bot registration and heartbeats  
-- Results table: completed job results
+### Database (PostgreSQL)
+- **Jobs table**: job state and metadata with atomic claiming
+- **Bots table**: bot registration, heartbeats, and soft deletes
+- **Results table**: completed job results with performance metrics
 
 ### Datalake (NDJSON files)
 - Append-only job results
@@ -187,15 +203,46 @@ docker-compose up -d --scale bot-1=5
 - **Bot Status**: Heartbeat monitoring and downtime detection
 - **Job Tracking**: Status transitions and processing history
 - **Datalake Stats**: Success rates and performance metrics
+- **Cleanup Management**: Automated resource cleanup with history tracking
+- **Orphaned Resources**: Detection and removal of stale data
+
+## Resource Management
+
+### Cleanup System
+
+The system includes automated cleanup to prevent resource accumulation:
+
+- **Database Cleanup**: Removes bot records older than retention period
+- **Container Cleanup**: Removes stopped/orphaned Docker containers  
+- **Orphaned Results**: Cleans up results referencing deleted bots
+- **Scheduled Execution**: Runs automatically every 6 hours
+- **Web Interface**: Manual control via dashboard at `/cleanup`
+- **History Tracking**: Maintains log of all cleanup operations
+
+### Manual Cleanup
+
+```bash
+# Monitor cleanup operations
+./scripts/monitor-cleanup.sh
+
+# Trigger cleanup (dry run)
+curl -X POST http://localhost:3001/admin/cleanup?dry_run=true \
+  -H "Authorization: Bearer admin-secret-token"
+
+# Execute cleanup
+curl -X POST http://localhost:3001/admin/cleanup?dry_run=false \
+  -H "Authorization: Bearer admin-secret-token"
+```
 
 ## Production Considerations
 
-- Replace SQLite with PostgreSQL for multi-instance deployment
-- Add proper authentication/authorization
-- Implement log aggregation and monitoring
-- Add automated scaling based on queue depth
-- Set up data retention policies for datalake
-- Add health checks and alerting
+- ✅ **PostgreSQL**: Production-ready database with ACID transactions
+- ✅ **Resource Cleanup**: Automated cleanup prevents data accumulation
+- ✅ **Monitoring**: Comprehensive dashboard and API metrics
+- **TODO**: Add proper authentication/authorization beyond admin token
+- **TODO**: Implement log aggregation and alerting
+- **TODO**: Add automated scaling based on queue depth
+- **TODO**: Set up Prometheus/Grafana monitoring stack
 
 ## Development
 

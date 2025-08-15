@@ -30,6 +30,8 @@ services:
       - BATCH_SIZE=5
       - ADMIN_TOKEN=admin-secret-token
       - DATABASE_URL=postgresql://ds_user:ds_password@postgres:5432/distributed_system
+      - BOT_RETENTION_DAYS=2
+      - CLEANUP_DRY_RUN=false
     volumes:
       - datalake-data:/app/datalake/data
     depends_on:

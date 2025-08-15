@@ -129,7 +129,7 @@ async def dashboard(request: Request):
     try:
         # Make parallel requests to main server
         metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics/summary")
-        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots")
+        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots?include_deleted=true")
         recent_jobs_task = make_request(f"{config.MAIN_SERVER_URL}/jobs?limit=10")
         
         # Fetch jobs by status to ensure we have examples of each type
@@ -186,7 +186,7 @@ async def bots_page(request: Request):
 @app.get("/bots/{bot_id}", response_class=HTMLResponse)
 async def bot_detail(request: Request, bot_id: str):
     try:
-        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots")
+        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots?include_deleted=true")
         jobs_task = make_request(f"{config.MAIN_SERVER_URL}/jobs?limit=20")
         stats_task = make_request(f"{config.MAIN_SERVER_URL}/bots/{bot_id}/stats")
         
@@ -609,7 +609,7 @@ async def populate_jobs(job_data: JobPopulate):
 async def get_metrics():
     try:
         metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics/summary")
-        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots")
+        bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots?include_deleted=true")
         
         metrics, bots = await asyncio.gather(metrics_task, bots_task)
         
@@ -716,6 +716,126 @@ def cleanup_processes():
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+
+# Cleanup management endpoints
+@app.get("/cleanup", response_class=HTMLResponse)
+async def cleanup_page(request: Request):
+    """Cleanup management page"""
+    return templates.TemplateResponse("cleanup.html", {"request": request})
+
+@app.get("/api/cleanup/status")
+async def get_cleanup_status():
+    """Get cleanup service status from main server"""
+    try:
+        status = await make_request(f"{config.MAIN_SERVER_URL}/admin/cleanup/status")
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get cleanup status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get cleanup status")
+
+@app.get("/api/cleanup/orphaned")
+async def get_orphaned_resources():
+    """Check for orphaned resources"""
+    try:
+        # Get deleted bots from database
+        deleted_bots_query = """
+            SELECT id, deleted_at, 
+                   EXTRACT(EPOCH FROM (NOW() - deleted_at))/86400 as days_ago 
+            FROM bots 
+            WHERE deleted_at IS NOT NULL 
+            ORDER BY deleted_at DESC 
+            LIMIT 20
+        """
+        
+        # Get stopped containers
+        docker_cmd = ["docker", "ps", "-a", "--filter", "name=bot-", "--filter", "status=exited", "--format", "{{.Names}}:{{.Status}}"]
+        
+        try:
+            # Query database through main server
+            db_response = await make_request(
+                f"{config.MAIN_SERVER_URL}/admin/query",
+                method="POST",
+                json_data={"query": deleted_bots_query},
+                headers={"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+            )
+            deleted_bots = db_response.get("results", [])
+        except:
+            deleted_bots = []
+        
+        try:
+            # Check Docker containers
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            stopped_containers = []
+            if process.returncode == 0:
+                for line in stdout.decode().strip().split('\n'):
+                    if line:
+                        parts = line.split(':', 1)
+                        if len(parts) == 2:
+                            stopped_containers.append({
+                                "name": parts[0],
+                                "status": parts[1]
+                            })
+        except:
+            stopped_containers = []
+        
+        return {
+            "deleted_bots": deleted_bots,
+            "stopped_containers": stopped_containers
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to check orphaned resources: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check orphaned resources")
+
+@app.post("/api/cleanup/run")
+async def run_cleanup(dry_run: bool = True):
+    """Trigger cleanup operation"""
+    try:
+        # Call main server cleanup endpoint
+        url = f"{config.MAIN_SERVER_URL}/admin/cleanup?dry_run={dry_run}"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Cleanup failed: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cleanup operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup operation failed: {str(e)}")
+
+@app.post("/api/bots/{bot_id}/reset")
+async def reset_bot_via_dashboard(bot_id: str):
+    """Reset bot state via dashboard"""
+    try:
+        # Call main server reset endpoint
+        url = f"{config.MAIN_SERVER_URL}/bots/{bot_id}/reset"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Reset failed: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bot reset operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bot reset failed: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

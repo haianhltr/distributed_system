@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cleanup Management - Distributed System Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-100" x-data="cleanupManager()">
+    <nav class="bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center">
+                        <h1 class="text-xl font-bold">Cleanup Management</h1>
+                    </div>
+                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                        <a href="/" class="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                            Dashboard
+                        </a>
+                        <a href="/bots" class="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                            Bots
+                        </a>
+                        <a href="/jobs" class="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                            Jobs
+                        </a>
+                        <a href="/cleanup" class="text-gray-900 border-b-2 border-indigo-500 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                            Cleanup
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <!-- Status Card -->
+        <div class="bg-white shadow rounded-lg p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Cleanup Service Status</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-gray-50 p-4 rounded">
+                    <div class="text-sm text-gray-500">Service Status</div>
+                    <div class="mt-1">
+                        <span x-show="status.service_running" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <i class="fas fa-check-circle mr-1"></i> Running
+                        </span>
+                        <span x-show="!status.service_running" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <i class="fas fa-times-circle mr-1"></i> Stopped
+                        </span>
+                    </div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <div class="text-sm text-gray-500">Retention Period</div>
+                    <div class="mt-1 text-lg font-semibold" x-text="status.config?.bot_retention_days + ' days'"></div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <div class="text-sm text-gray-500">Cleanup Interval</div>
+                    <div class="mt-1 text-lg font-semibold" x-text="status.config?.cleanup_interval_hours + ' hours'"></div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <div class="text-sm text-gray-500">Container Cleanup</div>
+                    <div class="mt-1">
+                        <span x-show="status.config?.container_cleanup_enabled" class="text-green-600 font-semibold">Enabled</span>
+                        <span x-show="!status.config?.container_cleanup_enabled" class="text-gray-600 font-semibold">Disabled</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Orphaned Resources -->
+        <div class="bg-white shadow rounded-lg p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">Orphaned Resources</h2>
+                <button @click="checkOrphaned()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm">
+                    <i class="fas fa-sync-alt mr-1"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Deleted Bots -->
+                <div>
+                    <h3 class="text-md font-medium mb-2">Deleted Bot Records</h3>
+                    <div class="bg-gray-50 rounded p-4 max-h-64 overflow-y-auto">
+                        <div x-show="orphaned.deleted_bots && orphaned.deleted_bots.length === 0" class="text-gray-500 text-sm">
+                            No deleted bot records found
+                        </div>
+                        <div x-show="orphaned.deleted_bots && orphaned.deleted_bots.length > 0" class="space-y-2">
+                            <template x-for="bot in orphaned.deleted_bots" :key="bot.id">
+                                <div class="bg-white p-2 rounded border">
+                                    <div class="text-sm font-medium" x-text="bot.id"></div>
+                                    <div class="text-xs text-gray-500">
+                                        Deleted <span x-text="formatDaysAgo(bot.days_ago)"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stopped Containers -->
+                <div>
+                    <h3 class="text-md font-medium mb-2">Stopped Containers</h3>
+                    <div class="bg-gray-50 rounded p-4 max-h-64 overflow-y-auto">
+                        <div x-show="orphaned.stopped_containers && orphaned.stopped_containers.length === 0" class="text-gray-500 text-sm">
+                            No stopped containers found
+                        </div>
+                        <div x-show="orphaned.stopped_containers && orphaned.stopped_containers.length > 0" class="space-y-2">
+                            <template x-for="container in orphaned.stopped_containers" :key="container.name">
+                                <div class="bg-white p-2 rounded border">
+                                    <div class="text-sm font-medium" x-text="container.name"></div>
+                                    <div class="text-xs text-gray-500" x-text="container.status"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cleanup Actions -->
+        <div class="bg-white shadow rounded-lg p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Cleanup Actions</h2>
+            
+            <div class="flex space-x-4">
+                <button @click="runCleanup(true)" 
+                        class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded flex items-center"
+                        :disabled="cleanupRunning">
+                    <i class="fas fa-eye mr-2"></i>
+                    <span x-show="!cleanupRunning">Dry Run</span>
+                    <span x-show="cleanupRunning">Running...</span>
+                </button>
+                
+                <button @click="confirmAndRunCleanup()" 
+                        class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded flex items-center"
+                        :disabled="cleanupRunning">
+                    <i class="fas fa-trash-alt mr-2"></i>
+                    <span x-show="!cleanupRunning">Execute Cleanup</span>
+                    <span x-show="cleanupRunning">Running...</span>
+                </button>
+            </div>
+            
+            <div x-show="showConfirm" class="mt-4 bg-red-50 border border-red-200 rounded p-4">
+                <p class="text-red-800 font-medium">⚠️ Warning: This will permanently delete resources!</p>
+                <p class="text-red-700 text-sm mt-2">Are you sure you want to proceed?</p>
+                <div class="mt-4 flex space-x-2">
+                    <button @click="runCleanup(false)" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm">
+                        Yes, Execute Cleanup
+                    </button>
+                    <button @click="showConfirm = false" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded text-sm">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cleanup Results -->
+        <div x-show="cleanupResults" class="bg-white shadow rounded-lg p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Cleanup Results</h2>
+            
+            <div class="bg-gray-50 rounded p-4">
+                <div class="mb-2">
+                    <span class="text-sm text-gray-500">Timestamp:</span>
+                    <span class="text-sm font-medium ml-2" x-text="cleanupResults?.timestamp"></span>
+                </div>
+                
+                <div class="mb-2">
+                    <span class="text-sm text-gray-500">Mode:</span>
+                    <span class="text-sm font-medium ml-2" x-text="cleanupResults?.dry_run ? 'Dry Run' : 'Executed'"></span>
+                </div>
+                
+                <div x-show="cleanupResults?.database_cleanup" class="mt-4">
+                    <h3 class="font-medium mb-2">Database Cleanup</h3>
+                    <pre class="bg-white p-2 rounded text-xs overflow-x-auto" x-text="JSON.stringify(cleanupResults.database_cleanup, null, 2)"></pre>
+                </div>
+                
+                <div x-show="cleanupResults?.container_cleanup" class="mt-4">
+                    <h3 class="font-medium mb-2">Container Cleanup</h3>
+                    <pre class="bg-white p-2 rounded text-xs overflow-x-auto" x-text="JSON.stringify(cleanupResults.container_cleanup, null, 2)"></pre>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Cleanup History -->
+        <div x-show="status.history && status.history.length > 0" class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-lg font-semibold mb-4">Cleanup History</h2>
+            
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mode</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bots Cleaned</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Containers Cleaned</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <template x-for="run in status.history" :key="run.timestamp">
+                            <tr>
+                                <td class="px-4 py-3 text-sm" x-text="new Date(run.timestamp).toLocaleString()"></td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span x-show="run.dry_run" class="text-yellow-600">Dry Run</span>
+                                    <span x-show="!run.dry_run" class="text-green-600">Executed</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm" x-text="run.deleted_bots"></td>
+                                <td class="px-4 py-3 text-sm" x-text="run.cleaned_containers"></td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span x-show="run.errors.length === 0" class="text-green-600">Success</span>
+                                    <span x-show="run.errors.length > 0" class="text-red-600">Error</span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function cleanupManager() {
+            return {
+                status: {},
+                orphaned: {},
+                cleanupResults: null,
+                cleanupRunning: false,
+                showConfirm: false,
+                
+                async init() {
+                    await this.fetchStatus();
+                    await this.checkOrphaned();
+                    // Auto-refresh every 30 seconds
+                    setInterval(() => {
+                        this.fetchStatus();
+                    }, 30000);
+                },
+                
+                async fetchStatus() {
+                    try {
+                        const response = await fetch('/api/cleanup/status');
+                        this.status = await response.json();
+                    } catch (error) {
+                        console.error('Failed to fetch status:', error);
+                    }
+                },
+                
+                async checkOrphaned() {
+                    try {
+                        const response = await fetch('/api/cleanup/orphaned');
+                        this.orphaned = await response.json();
+                    } catch (error) {
+                        console.error('Failed to check orphaned resources:', error);
+                    }
+                },
+                
+                confirmAndRunCleanup() {
+                    this.showConfirm = true;
+                },
+                
+                async runCleanup(dryRun) {
+                    this.showConfirm = false;
+                    this.cleanupRunning = true;
+                    
+                    try {
+                        const response = await fetch(`/api/cleanup/run?dry_run=${dryRun}`, {
+                            method: 'POST'
+                        });
+                        
+                        if (response.ok) {
+                            this.cleanupResults = await response.json();
+                            // Refresh orphaned resources after cleanup
+                            await this.checkOrphaned();
+                        } else {
+                            alert('Cleanup failed: ' + response.statusText);
+                        }
+                    } catch (error) {
+                        console.error('Cleanup error:', error);
+                        alert('Cleanup failed: ' + error.message);
+                    } finally {
+                        this.cleanupRunning = false;
+                    }
+                },
+                
+                formatDaysAgo(days) {
+                    if (days < 1) {
+                        return 'today';
+                    } else if (days < 2) {
+                        return 'yesterday';
+                    } else {
+                        return Math.floor(days) + ' days ago';
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
