@@ -31,7 +31,9 @@
       "Bash(python:*)",
       "Bash(docker exec:*)",
       "Bash(docker port:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(ls:*)",
+      "Bash(psql:*)"
     ],
     "deny": []
   }

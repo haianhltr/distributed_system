@@ -4,9 +4,9 @@ import asyncio
 import aiohttp
 import logging
 from typing import Optional, Dict, Any, Tuple
-from config.settings import BotConfig
-from utils.circuit_breaker import CircuitBreaker
-from models.schemas import CircuitBreakerConfig
+from ..config.settings import BotConfig
+from ..utils.circuit_breaker import CircuitBreaker
+from ..models.schemas import CircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 

@@ -2,8 +2,8 @@
 
 import time
 import logging
-from models.schemas import CircuitBreakerConfig
-from models.enums import CircuitBreakerState
+from ..models.schemas import CircuitBreakerConfig
+from ..models.enums import CircuitBreakerState
 
 logger = logging.getLogger(__name__)
 

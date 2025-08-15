@@ -729,8 +729,8 @@ async def get_bot_stats(bot_id: str, hours: int = 24):
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
                 FROM results 
                 WHERE processed_by = $1 
-                AND processed_at > NOW() - INTERVAL $2
-            """, bot_id, f"{hours} hours")
+                AND processed_at > NOW() - make_interval(hours => $2)
+            """, bot_id, hours)
             
             # Hourly performance for the last 24 hours (for graphing)
             hourly_stats = await conn.fetch("""

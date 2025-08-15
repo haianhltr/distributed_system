@@ -5,9 +5,9 @@ import signal
 import logging
 from typing import Optional
 
-from config.settings import get_config
-from services.bot_service import BotService
-from utils.logging import setup_logging
+from .config.settings import get_config
+from .services.bot_service import BotService
+from .utils.logging import setup_logging
 
 # Global bot instance for signal handling
 bot_instance: Optional[BotService] = None
