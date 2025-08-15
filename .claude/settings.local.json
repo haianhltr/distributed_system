@@ -33,7 +33,9 @@
       "Bash(docker port:*)",
       "Bash(mv:*)",
       "Bash(ls:*)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker rm:*)"
     ],
     "deny": []
   }

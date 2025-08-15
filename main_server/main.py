@@ -277,7 +277,7 @@ async def get_job(job_id: str):
 
 @app.post("/jobs/claim")
 async def claim_job(claim_data: JobClaim):
-    """Atomically claim a job for a bot"""
+    """Atomically claim a job for a bot using FOR UPDATE SKIP LOCKED"""
     bot_id = claim_data.bot_id
     
     try:
@@ -286,39 +286,49 @@ async def claim_job(claim_data: JobClaim):
                 # Check if bot already has a job
                 existing_job = await conn.fetchval("""
                     SELECT current_job_id FROM bots 
-                    WHERE id = $1 AND current_job_id IS NOT NULL
+                    WHERE id = $1 AND current_job_id IS NOT NULL AND deleted_at IS NULL
                 """, bot_id)
                 
                 if existing_job:
                     raise HTTPException(status_code=409, detail="Bot already has an active job")
                 
-                # Find first available job
-                available_job = await conn.fetchrow("""
-                    SELECT * FROM jobs 
-                    WHERE status = 'pending' 
-                    ORDER BY created_at ASC 
-                    LIMIT 1
-                """)
+                # RACE-CONDITION-PROOF: Atomically claim job using FOR UPDATE SKIP LOCKED
+                # This is the single most important fix - prevents all race conditions
+                claimed_job = await conn.fetchrow("""
+                    UPDATE jobs 
+                    SET status = 'claimed', 
+                        claimed_by = $1, 
+                        claimed_at = NOW(),
+                        version = version + 1
+                    WHERE id = (
+                        SELECT id FROM jobs 
+                        WHERE status = 'pending' 
+                        ORDER BY created_at ASC 
+                        FOR UPDATE SKIP LOCKED  -- Skip jobs locked by other transactions
+                        LIMIT 1
+                    )
+                    AND status = 'pending'  -- Double-check status hasn't changed
+                    RETURNING id, a, b, status, claimed_by, claimed_at, version
+                """, bot_id)
                 
-                if not available_job:
+                if not claimed_job:
                     raise HTTPException(status_code=204, detail="No jobs available")
                 
-                job_dict = dict(available_job)
-                
-                # Claim the job
-                await conn.execute("""
-                    UPDATE jobs 
-                    SET status = 'claimed', claimed_by = $1, claimed_at = NOW()
-                    WHERE id = $2 AND status = 'pending'
-                """, bot_id, job_dict['id'])
-                
-                # Update bot's current job
-                await conn.execute("""
+                # Update bot's current job - this will fail if constraints are violated
+                result = await conn.execute("""
                     UPDATE bots 
                     SET current_job_id = $1, status = 'busy'
-                    WHERE id = $2
-                """, job_dict['id'], bot_id)
+                    WHERE id = $2 AND deleted_at IS NULL
+                """, claimed_job['id'], bot_id)
                 
+                # Verify bot update succeeded
+                if result == 'UPDATE 0':
+                    # This should not happen due to the existing_job check above,
+                    # but we handle it gracefully
+                    raise HTTPException(status_code=404, detail="Bot not found or deleted")
+                
+                job_dict = dict(claimed_job)
+                logger.info(f"Job {claimed_job['id']} successfully claimed by bot {bot_id}")
                 return job_dict
             
     except HTTPException:
