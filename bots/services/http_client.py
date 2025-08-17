@@ -4,9 +4,9 @@ import asyncio
 import aiohttp
 import logging
 from typing import Optional, Dict, Any, Tuple
-from ..config.settings import BotConfig
-from ..utils.circuit_breaker import CircuitBreaker
-from ..models.schemas import CircuitBreakerConfig
+from config.settings import BotConfig
+from utils.circuit_breaker import CircuitBreaker
+from models.schemas import CircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -160,19 +160,19 @@ class HttpClient:
             logger.error(f"Failed to start job {job_id}: {e}")
             return False
     
-    async def complete_job(self, job_id: str, sum_result: int, duration_ms: int) -> bool:
+    async def complete_job(self, job_id: str, result: int, duration_ms: int) -> bool:
         """Mark job as completed successfully."""
         try:
             async with self.session.post(
                 f"{self.config.main_server_url}/jobs/{job_id}/complete",
                 json={
                     "bot_id": self.config.bot_id,
-                    "sum": sum_result,
+                    "result": result,
                     "duration_ms": duration_ms
                 }
             ) as response:
                 if response.status == 200:
-                    logger.info(f"Job completed successfully: {job_id} = {sum_result} ({duration_ms}ms)")
+                    logger.info(f"Job completed successfully: {job_id} = {result} ({duration_ms}ms)")
                     return True
                 else:
                     error_data = await response.json()

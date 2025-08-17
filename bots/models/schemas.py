@@ -27,6 +27,7 @@ class JobData:
     id: str
     a: int
     b: int
+    operation: str = "sum"
     status: Optional[str] = None
 
 

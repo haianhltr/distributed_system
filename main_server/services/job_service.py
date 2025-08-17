@@ -2,6 +2,7 @@
 
 import uuid
 import random
+import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import structlog
@@ -25,6 +26,7 @@ class JobService:
     async def create_jobs(self, job_data: JobPopulate) -> Dict[str, Any]:
         """Create a batch of new jobs."""
         batch_size = job_data.batchSize
+        operation = job_data.operation  # Get operation from request
         jobs = []
         
         try:
@@ -33,17 +35,24 @@ class JobService:
                     for _ in range(batch_size):
                         job_id = str(uuid.uuid4())
                         a = random.randint(0, 999)
-                        b = random.randint(0, 999)
                         
+                        # Handle division by zero prevention
+                        if operation == 'divide':
+                            b = random.randint(1, 999)  # Avoid b = 0
+                        else:
+                            b = random.randint(0, 999)
+                        
+                        # FIXED: Include operation field in INSERT
                         await conn.execute("""
-                            INSERT INTO jobs (id, a, b, status, created_at) 
-                            VALUES ($1, $2, $3, 'pending', CURRENT_TIMESTAMP)
-                        """, job_id, a, b)
+                            INSERT INTO jobs (id, a, b, operation, status, created_at) 
+                            VALUES ($1, $2, $3, $4, 'pending', CURRENT_TIMESTAMP)
+                        """, job_id, a, b, operation)
                         
-                        jobs.append({"id": job_id, "a": a, "b": b})
+                        # FIXED: Include operation in response
+                        jobs.append({"id": job_id, "a": a, "b": b, "operation": operation})
             
-            logger.info("Created new jobs", count=batch_size)
-            return {"created": batch_size, "jobs": jobs}
+            logger.info("Created new jobs", count=batch_size, operation=operation)
+            return {"created": batch_size, "jobs": jobs, "operation": operation}
             
         except Exception as e:
             logger.error("Failed to populate jobs", error=str(e))
@@ -55,19 +64,55 @@ class JobService:
             async with self.db.get_connection() as conn:
                 if status:
                     jobs = await conn.fetch("""
-                        SELECT * FROM jobs 
-                        WHERE status = $1 
-                        ORDER BY created_at DESC 
+                        SELECT j.*, r.result, r.duration_ms,
+                               CASE 
+                                   WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
+                                   THEN EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 
+                                   ELSE NULL 
+                               END as processing_duration_minutes
+                        FROM jobs j 
+                        LEFT JOIN results r ON j.id = r.job_id
+                        WHERE j.status = $1 
+                        ORDER BY j.created_at DESC 
                         LIMIT $2 OFFSET $3
                     """, status, limit, offset)
                 else:
+                    # Priority sorting: pending/claimed/processing first, then completed/failed
+                    # Within each priority group, sort by created_at DESC
                     jobs = await conn.fetch("""
-                        SELECT * FROM jobs 
-                        ORDER BY created_at DESC 
+                        SELECT j.*, r.result, r.duration_ms,
+                               CASE 
+                                   WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
+                                   THEN EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 
+                                   ELSE NULL 
+                               END as processing_duration_minutes
+                        FROM jobs j 
+                        LEFT JOIN results r ON j.id = r.job_id
+                        ORDER BY 
+                            CASE j.status
+                                WHEN 'pending' THEN 1
+                                WHEN 'claimed' THEN 2  
+                                WHEN 'processing' THEN 3
+                                WHEN 'succeeded' THEN 4
+                                WHEN 'failed' THEN 5
+                                ELSE 6
+                            END,
+                            j.created_at DESC
                         LIMIT $1 OFFSET $2
                     """, limit, offset)
                 
-                return [dict(row) for row in jobs]
+                # Convert to dict and ensure all fields are included
+                job_list = []
+                for row in jobs:
+                    job_dict = dict(row)
+                    # Explicitly handle result and duration_ms fields
+                    if 'result' not in job_dict:
+                        job_dict['result'] = None
+                    if 'duration_ms' not in job_dict:
+                        job_dict['duration_ms'] = None
+                    job_list.append(job_dict)
+                
+                return job_list
             
         except Exception as e:
             logger.error("Failed to get jobs", error=str(e))
@@ -77,12 +122,30 @@ class JobService:
         """Get specific job by ID."""
         try:
             async with self.db.get_connection() as conn:
-                job = await conn.fetchrow("SELECT * FROM jobs WHERE id = $1", job_id)
+                job = await conn.fetchrow("""
+                    SELECT j.*, r.result, r.duration_ms,
+                           CASE 
+                               WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
+                               THEN EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 
+                               ELSE NULL 
+                           END as processing_duration_minutes
+                    FROM jobs j 
+                    LEFT JOIN results r ON j.id = r.job_id
+                    WHERE j.id = $1
+                """, job_id)
                 
                 if not job:
                     raise NotFoundError(f"Job {job_id} not found")
                 
-                return dict(job)
+                # Convert to dict and ensure all fields are included
+                job_dict = dict(job)
+                # Explicitly handle result and duration_ms fields
+                if 'result' not in job_dict:
+                    job_dict['result'] = None
+                if 'duration_ms' not in job_dict:
+                    job_dict['duration_ms'] = None
+                    
+                return job_dict
                 
         except NotFoundError:
             raise
@@ -106,13 +169,28 @@ class JobService:
                     if existing_job:
                         raise ConflictError("Bot already has an active job")
                     
-                    # Find first available job
-                    available_job = await conn.fetchrow("""
-                        SELECT * FROM jobs 
-                        WHERE status = 'pending' 
-                        ORDER BY created_at ASC 
-                        LIMIT 1
-                    """)
+                    # Get bot's assigned operation
+                    bot_operation = await conn.fetchval("""
+                        SELECT assigned_operation FROM bots WHERE id = $1
+                    """, bot_id)
+                    
+                    # Find first available job matching bot's operation (or any if unassigned)
+                    if bot_operation:
+                        # Bot has assigned operation - only claim jobs of that type
+                        available_job = await conn.fetchrow("""
+                            SELECT * FROM jobs 
+                            WHERE status = 'pending' AND operation = $1
+                            ORDER BY created_at ASC 
+                            LIMIT 1
+                        """, bot_operation)
+                    else:
+                        # Bot has no assigned operation - can claim any job
+                        available_job = await conn.fetchrow("""
+                            SELECT * FROM jobs 
+                            WHERE status = 'pending' 
+                            ORDER BY created_at ASC 
+                            LIMIT 1
+                        """)
                     
                     if not available_job:
                         raise NotFoundError("No jobs available")
@@ -167,7 +245,7 @@ class JobService:
     async def complete_job(self, job_id: str, complete_data: JobComplete) -> Dict[str, str]:
         """Mark job as completed successfully."""
         bot_id = complete_data.bot_id
-        sum_result = complete_data.sum
+        result = complete_data.result
         duration_ms = complete_data.duration_ms
         
         try:
@@ -193,10 +271,28 @@ class JobService:
                     
                     # Create result record
                     result_id = str(uuid.uuid4())
+                    # Only populate sum column for sum operations
+                    sum_value = result if job_dict['operation'] == 'sum' else None
+                    
+                    # Prepare JSONB data for new generic schema
+                    input_data = {
+                        "a": job_dict['a'],
+                        "b": job_dict['b']
+                    }
+                    output_data = {
+                        "result": result
+                    }
+                    metadata = {
+                        "operation_type": job_dict['operation'],
+                        "execution_context": "distributed_bot",
+                        "legacy_mode": True
+                    }
+                    
                     await conn.execute("""
-                        INSERT INTO results (id, job_id, a, b, sum, processed_by, processed_at, duration_ms, status)
-                        VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, 'succeeded')
-                    """, result_id, job_id, job_dict['a'], job_dict['b'], sum_result, bot_id, duration_ms)
+                        INSERT INTO results (id, job_id, a, b, sum, result, operation, processed_by, processed_at, duration_ms, status, input_data, output_data, metadata)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11, $12, $13)
+                    """, result_id, job_id, job_dict['a'], job_dict['b'], sum_value, result, job_dict['operation'], bot_id, duration_ms, 
+                    'succeeded', input_data, output_data, metadata)
                     
                     # Clear bot's current job
                     await conn.execute("""
@@ -211,7 +307,8 @@ class JobService:
                         "job_id": job_id,
                         "a": job_dict['a'],
                         "b": job_dict['b'],
-                        "sum": sum_result,
+                        "result": result,
+                        "operation": job_dict['operation'],
                         "processed_by": bot_id,
                         "processed_at": datetime.utcnow().isoformat(),
                         "duration_ms": duration_ms,
@@ -252,12 +349,30 @@ class JobService:
                         WHERE id = $2
                     """, error, job_id)
                     
-                    # Create result record
+                    # Create result record  
                     result_id = str(uuid.uuid4())
+                    
+                    # Prepare JSONB data for new generic schema
+                    input_data = {
+                        "a": job_dict['a'],
+                        "b": job_dict['b']
+                    }
+                    output_data = {
+                        "error": error,
+                        "result": None
+                    }
+                    metadata = {
+                        "operation_type": job_dict['operation'],
+                        "execution_context": "distributed_bot",
+                        "legacy_mode": True,
+                        "failure_reason": error
+                    }
+                    
                     await conn.execute("""
-                        INSERT INTO results (id, job_id, a, b, sum, processed_by, processed_at, duration_ms, status, error)
-                        VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, 'failed', $8)
-                    """, result_id, job_id, job_dict['a'], job_dict['b'], 0, bot_id, 0, error)
+                        INSERT INTO results (id, job_id, a, b, sum, result, operation, processed_by, processed_at, duration_ms, status, error, input_data, output_data, metadata)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11, $12, $13, $14)
+                    """, result_id, job_id, job_dict['a'], job_dict['b'], None, 0, job_dict['operation'], bot_id, 0, 
+                    'failed', error, input_data, output_data, metadata)
                     
                     # Clear bot's current job
                     await conn.execute("""
@@ -272,7 +387,8 @@ class JobService:
                         "job_id": job_id,
                         "a": job_dict['a'],
                         "b": job_dict['b'],
-                        "sum": 0,
+                        "result": 0,
+                        "operation": job_dict['operation'],
                         "processed_by": bot_id,
                         "processed_at": datetime.utcnow().isoformat(),
                         "duration_ms": 0,

@@ -57,7 +57,7 @@
                                 
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Task:</span>
-                                    <span class="font-semibold text-lg">{{ job.a }} + {{ job.b }}</span>
+                                    <span class="font-semibold text-lg">{{ job | format_task }}</span>
                                 </div>
                                 
                                 {% if job.result is defined %}
@@ -73,7 +73,7 @@
                                 
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Created:</span>
-                                    <span class="text-gray-900">{{ job.created_at }}</span>
+                                    <span class="text-gray-900">{{ job.created_at | format_datetime }}</span>
                                 </div>
                             </div>
                         </div>
@@ -100,21 +100,27 @@
                                 {% if job.started_at %}
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Started:</span>
-                                    <span class="text-gray-900">{{ job.started_at }}</span>
+                                    <span class="text-gray-900">{{ job.started_at | format_datetime }}</span>
                                 </div>
                                 {% endif %}
                                 
                                 {% if job.finished_at %}
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Finished:</span>
-                                    <span class="text-gray-900">{{ job.finished_at }}</span>
+                                    <span class="text-gray-900">{{ job.finished_at | format_datetime }}</span>
                                 </div>
                                 {% endif %}
                                 
                                 {% if job.started_at and job.finished_at %}
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Duration:</span>
-                                    <span class="text-gray-900">{{ job.duration or 'Calculating...' }}</span>
+                                    <span class="text-gray-900">
+                                        {% if job.duration_ms %}
+                                            {{ (job.duration_ms / 1000) | round(1) }}s
+                                        {% else %}
+                                            Calculating...
+                                        {% endif %}
+                                    </span>
                                 </div>
                                 {% endif %}
                                 
@@ -161,8 +167,8 @@
                                 </div>
                                 <div class="ml-4">
                                     <h4 class="text-sm font-semibold text-gray-900">Job Created</h4>
-                                    <p class="text-sm text-gray-600">{{ job.created_at }}</p>
-                                    <p class="text-xs text-gray-500">Task: {{ job.a }} + {{ job.b }}</p>
+                                    <p class="text-sm text-gray-600">{{ job.created_at | format_datetime }}</p>
+                                    <p class="text-xs text-gray-500">Task: {{ job | format_task }}</p>
                                 </div>
                             </div>
                             
@@ -176,7 +182,7 @@
                                 </div>
                                 <div class="ml-4">
                                     <h4 class="text-sm font-semibold text-gray-900">Job Started</h4>
-                                    <p class="text-sm text-gray-600">{{ job.started_at }}</p>
+                                    <p class="text-sm text-gray-600">{{ job.started_at | format_datetime }}</p>
                                     <p class="text-xs text-gray-500">Assigned to bot: {{ job.claimed_by[:12] }}...</p>
                                 </div>
                             </div>
@@ -198,9 +204,9 @@
                                 </div>
                                 <div class="ml-4">
                                     <h4 class="text-sm font-semibold text-gray-900">Job {{ job.status|title }}</h4>
-                                    <p class="text-sm text-gray-600">{{ job.finished_at }}</p>
+                                    <p class="text-sm text-gray-600">{{ job.finished_at | format_datetime }}</p>
                                     {% if job.status == 'succeeded' %}
-                                        <p class="text-xs text-green-600">Result: {{ job.result or (job.a + job.b) }}</p>
+                                        <p class="text-xs text-green-600">Result: {% if job.result is not none %}{{ job.result | format_number }}{% else %}Calculating...{% endif %}</p>
                                     {% elif job.error %}
                                         <p class="text-xs text-red-600">Error: {{ job.error }}</p>
                                     {% endif %}

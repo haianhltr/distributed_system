@@ -56,6 +56,17 @@
                                     <span class="font-medium">{{ bot.computed_status or bot.status }}</span>
                                 </div>
                                 
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Assigned Operation:</span>
+                                    {% if bot.assigned_operation %}
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{ bot.assigned_operation | get_operation_badge }}">
+                                            {{ bot.assigned_operation }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-gray-500">Unassigned</span>
+                                    {% endif %}
+                                </div>
+                                
                                 {% if bot.current_job_id %}
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Current Job:</span>
@@ -79,13 +90,13 @@
                                 
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Last Heartbeat:</span>
-                                    <span class="text-gray-900">{{ bot.last_heartbeat_at or 'Never' }}</span>
+                                    <span class="text-gray-900">{{ bot.last_heartbeat_at | format_datetime if bot.last_heartbeat_at else 'Never' }}</span>
                                 </div>
                                 
                                 {% if bot.created_at %}
                                 <div class="flex justify-between">
                                     <span class="text-gray-600">Registered:</span>
-                                    <span class="text-gray-900">{{ bot.created_at }}</span>
+                                    <span class="text-gray-900">{{ bot.created_at | format_datetime }}</span>
                                 </div>
                                 {% endif %}
                             </div>
@@ -139,12 +150,16 @@
                     </div>
 
                     <div class="mt-6 pt-6 border-t border-gray-200 flex space-x-4">
+                        <button onclick="assignOperation('{{ bot.id }}')" 
+                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                            Assign Operation
+                        </button>
                         <button onclick="deleteBot('{{ bot.id }}')" 
                                 class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
                             Delete Bot
                         </button>
                         <button onclick="window.location.reload()" 
-                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                                class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">
                             Refresh
                         </button>
                     </div>
@@ -291,6 +306,63 @@
     </div>
 
     <script>
+    let availableOperations = [];
+    
+    // Load operations on page load
+    async function loadOperations() {
+        try {
+            const response = await fetch('/api/operations');
+            const data = await response.json();
+            availableOperations = data.operations || [];
+        } catch (error) {
+            console.error('Failed to load operations:', error);
+            availableOperations = ['sum', 'multiply', 'subtract', 'divide']; // fallback
+        }
+    }
+    
+    async function assignOperation(botId) {
+        if (availableOperations.length === 0) {
+            await loadOperations();
+        }
+        
+        // Create operation selection dialog
+        const operations = ['unassigned', ...availableOperations.map(op => op.name || op)];
+        const choice = prompt(
+            `Choose operation for bot ${botId}:\n` + 
+            operations.map((op, i) => `${i}: ${op}`).join('\n'),
+            '0'
+        );
+        
+        if (choice === null) return; // cancelled
+        
+        const choiceIndex = parseInt(choice);
+        if (isNaN(choiceIndex) || choiceIndex < 0 || choiceIndex >= operations.length) {
+            alert('Invalid choice');
+            return;
+        }
+        
+        const selectedOperation = choiceIndex === 0 ? null : operations[choiceIndex];
+        
+        try {
+            const response = await fetch(`/api/bots/${botId}/assign-operation`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operation: selectedOperation })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Bot ${botId} ${result.action}`);
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to assign operation: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+    
     async function deleteBot(botId) {
         if (!confirm(`Are you sure you want to delete bot ${botId}?`)) return;
         
@@ -313,6 +385,9 @@
 
     // Initialize performance charts
     document.addEventListener('DOMContentLoaded', function() {
+        // Load operations
+        loadOperations();
+        
         const hourlyPerformance = {{ stats.hourly_performance | tojson | safe }};
         
         // Prepare data for charts

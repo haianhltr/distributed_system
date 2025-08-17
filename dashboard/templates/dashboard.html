@@ -42,6 +42,9 @@
                         <button onclick="resetBots()" class="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm">
                             Reset Bots
                         </button>
+                        <button onclick="clearAllData()" class="bg-gray-800 text-white px-3 py-2 rounded hover:bg-gray-900 text-sm">
+                            Clear All Data
+                        </button>
                     </div>
                 </div>
                 
@@ -53,19 +56,19 @@
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Pending:</span>
-                                <span class="font-semibold">{{ metrics.jobs.get('pending', 0) | format_number }}</span>
+                                <span class="font-semibold">{{ metrics.jobs.by_status.get('pending', 0) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Processing:</span>
-                                <span class="font-semibold text-blue-600">{{ metrics.jobs.get('processing', 0) | format_number }}</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.jobs.by_status.get('processing', 0) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Succeeded:</span>
-                                <span class="font-semibold text-green-600">{{ metrics.jobs.get('succeeded', 0) | format_number }}</span>
+                                <span class="font-semibold text-green-600">{{ metrics.jobs.by_status.get('succeeded', 0) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Failed:</span>
-                                <span class="font-semibold text-red-600">{{ metrics.jobs.get('failed', 0) | format_number }}</span>
+                                <span class="font-semibold text-red-600">{{ metrics.jobs.by_status.get('failed', 0) | format_number }}</span>
                             </div>
                         </div>
                     </div>
@@ -76,19 +79,19 @@
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Total:</span>
-                                <span class="font-semibold">{{ metrics.bots.get('total', 0) | format_number }}</span>
+                                <span class="font-semibold">{{ metrics.bots.total | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Active:</span>
-                                <span class="font-semibold text-green-600">{{ (metrics.bots.get('idle', 0) + metrics.bots.get('busy', 0)) | format_number }}</span>
+                                <span class="font-semibold text-green-600">{{ (metrics.bots.by_status.get('idle', 0) + metrics.bots.by_status.get('busy', 0)) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Busy:</span>
-                                <span class="font-semibold text-blue-600">{{ metrics.bots.get('busy', 0) | format_number }}</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.bots.by_status.get('busy', 0) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Down:</span>
-                                <span class="font-semibold text-red-600">{{ metrics.bots.get('down', 0) | format_number }}</span>
+                                <span class="font-semibold text-red-600">{{ metrics.bots.by_status.get('down', 0) | format_number }}</span>
                             </div>
                         </div>
                     </div>
@@ -99,11 +102,11 @@
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Completed (1h):</span>
-                                <span class="font-semibold">{{ metrics.throughput.get('completed_last_hour', 0) | format_number }}</span>
+                                <span class="font-semibold">{{ metrics.activity.get('jobs_created_last_hour', 0) | format_number }}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Rate/hour:</span>
-                                <span class="font-semibold text-blue-600">{{ metrics.throughput.get('completed_last_hour', 0) | format_number }}</span>
+                                <span class="font-semibold text-blue-600">{{ metrics.activity.get('jobs_created_last_hour', 0) | format_number }}</span>
                             </div>
                         </div>
                     </div>
@@ -168,6 +171,7 @@
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bot ID</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Operation</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lifecycle</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Job</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Processing Duration</th>
@@ -178,7 +182,7 @@
                             <tbody class="bg-white divide-y divide-gray-200">
                                 {% if bots|length == 0 %}
                                     <tr>
-                                        <td colspan="7" class="px-6 py-4 text-center text-gray-500">No bots registered</td>
+                                        <td colspan="8" class="px-6 py-4 text-center text-gray-500">No bots registered</td>
                                     </tr>
                                 {% else %}
                                     {% for bot in bots %}
@@ -192,6 +196,17 @@
                                             <span class="px-2 py-1 text-xs font-medium rounded-full {{ (bot.computed_status or bot.status) | get_status_badge }}">
                                                 {{ bot.computed_status or bot.status }}
                                             </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            {% if bot.assigned_operation %}
+                                                <span class="px-2 py-1 text-xs font-medium rounded-full {{ bot.assigned_operation | get_operation_badge }}">
+                                                    {{ bot.assigned_operation }}
+                                                </span>
+                                            {% else %}
+                                                <span class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                                                    unassigned
+                                                </span>
+                                            {% endif %}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span class="px-2 py-1 text-xs font-medium rounded-full 
@@ -233,6 +248,10 @@
                                             {% if bot.lifecycle_status == 'deleted' %}
                                                 <span class="text-gray-400">-</span>
                                             {% else %}
+                                                <button onclick="assignOperation('{{ bot.id }}')" 
+                                                        class="text-purple-600 hover:text-purple-900 mr-2 text-xs">
+                                                    Assign
+                                                </button>
                                                 <button onclick="deleteBot('{{ bot.id }}')" 
                                                         class="text-red-600 hover:text-red-900 mr-2">
                                                     Delete
@@ -288,15 +307,36 @@
                                 </div>
                                 
                                 <div class="text-lg font-semibold text-gray-900 mb-2">
-                                    {{ job.a }} + {{ job.b }} = 
+                                    {{ job.a }} 
+                                    {% if job.operation == 'sum' or not job.operation %}+
+                                    {% elif job.operation == 'subtract' %}-
+                                    {% elif job.operation == 'multiply' %}×
+                                    {% elif job.operation == 'divide' %}÷
+                                    {% else %}{{ job.operation }}
+                                    {% endif %} 
+                                    {{ job.b }} = 
                                     {% if job.status == 'succeeded' %}
-                                        <span class="text-green-600">{{ job.a + job.b }}</span>
+                                        <span class="text-green-600">
+                                            {% if job.result is not none %}
+                                                {{ job.result | format_number }}
+                                            {% else %}
+                                                Calculating...
+                                            {% endif %}
+                                        </span>
                                     {% elif job.status == 'failed' %}
                                         <span class="text-red-600">Error</span>
                                     {% else %}
                                         <span class="text-gray-400">...</span>
                                     {% endif %}
                                 </div>
+                                
+                                {% if job.operation %}
+                                <div class="mb-2">
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.operation | get_operation_badge }}">
+                                        {{ job.operation }}
+                                    </span>
+                                </div>
+                                {% endif %}
                                 
                                 <div class="text-sm text-gray-600 space-y-1">
                                     {% if job.claimed_by %}
@@ -313,6 +353,10 @@
                                     
                                     {% if job.error %}
                                     <div class="text-red-600 text-xs">Error: {{ job.error }}</div>
+                                    {% endif %}
+                                    
+                                    {% if job.duration_ms %}
+                                    <div>Duration: <span class="text-blue-600">{{ (job.duration_ms / 1000) | round(1) }}s</span></div>
                                     {% endif %}
                                 </div>
                             </div>
@@ -338,6 +382,7 @@
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Operation</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Numbers</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bot</th>
@@ -352,8 +397,19 @@
                                             {{ job.id[:8] }}...
                                         </a>
                                     </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        {% if job.operation %}
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.operation | get_operation_badge }}">
+                                                {{ job.operation }}
+                                            </span>
+                                        {% else %}
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                                                sum
+                                            </span>
+                                        {% endif %}
+                                    </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {{ job.a }} + {{ job.b }}
+                                        {{ job.a }} {{ job.operation or '+' }} {{ job.b }}
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span class="px-2 py-1 text-xs font-medium rounded-full {{ job.status | get_status_badge }}">
@@ -387,11 +443,17 @@
         const batchSize = prompt('How many jobs to create?', '5');
         if (!batchSize) return;
         
+        const operation = prompt('Which operation? (sum, subtract, multiply, divide)', 'sum');
+        if (!operation) return;
+        
         try {
             const response = await fetch('/jobs/populate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ batchSize: parseInt(batchSize) })
+                body: JSON.stringify({ 
+                    batchSize: parseInt(batchSize),
+                    operation: operation
+                })
             });
             
             if (response.ok) {
@@ -490,6 +552,36 @@
             } else {
                 const error = await response.json();
                 alert('Failed to reset bots: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function clearAllData() {
+        if (!confirm('🚨 WARNING: This will completely clear ALL jobs, results, and reset all bots. This action cannot be undone. Are you sure?')) return;
+        
+        // Double confirmation for safety
+        if (!confirm('This will delete ALL system data. Type "CLEAR" in the next prompt to confirm.')) return;
+        
+        const confirmation = prompt('Type "CLEAR" to confirm deletion of all data:');
+        if (confirmation !== 'CLEAR') {
+            alert('Cancelled. Data was not cleared.');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/clear-all-data', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`✅ System cleared successfully!\n- ${result.deleted_jobs} jobs deleted\n- ${result.reset_bots} bots reset\n- ${result.cleared_files} result files cleared`);
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to clear data: ' + error.detail);
             }
         } catch (error) {
             alert('Error: ' + error.message);
@@ -599,6 +691,34 @@
         } catch (error) {
             console.error('Reset bot error:', error);
             alert('Failed to reset bot: Network error');
+        }
+    }
+    
+    // Assign operation to bot
+    async function assignOperation(botId) {
+        const operation = prompt('Assign operation (sum, subtract, multiply, divide) or leave empty to unassign:', '');
+        if (operation === null) return; // User cancelled
+        
+        const operationValue = operation.trim() === '' ? null : operation.trim();
+        
+        try {
+            const response = await fetch(`/api/bots/${botId}/assign-operation`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operation: operationValue })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Bot ${botId} ${result.action} successfully!`);
+                location.reload();
+            } else {
+                const error = await response.json();
+                alert(`Failed to assign operation: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Assign operation error:', error);
+            alert('Failed to assign operation: Network error');
         }
     }
     

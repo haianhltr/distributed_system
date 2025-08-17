@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -60,9 +61,13 @@ bot_processes: Dict[str, subprocess.Popen] = {}
 # Pydantic models
 class JobPopulate(BaseModel):
     batchSize: int = 5
+    operation: str = "sum"
 
 class ScaleUp(BaseModel):
     count: int = 1
+
+class BotAssignOperation(BaseModel):
+    operation: Optional[str] = None
 
 # Template filters
 def format_number(num):
@@ -83,9 +88,54 @@ def get_status_badge(status):
     }
     return colors.get(status, 'bg-gray-100 text-gray-800')
 
+def get_operation_badge(operation):
+    """Get CSS classes for operation badges"""
+    colors = {
+        'sum': 'bg-blue-100 text-blue-800',
+        'subtract': 'bg-purple-100 text-purple-800',
+        'multiply': 'bg-green-100 text-green-800',
+        'divide': 'bg-red-100 text-red-800'
+    }
+    return colors.get(operation, 'bg-gray-100 text-gray-800')
+
+def format_datetime(dt_str):
+    """Format datetime string to user-friendly format"""
+    if not dt_str:
+        return '-'
+    try:
+        # Parse the ISO datetime string
+        from datetime import datetime
+        dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        # Format as "Aug 16, 2:44 PM"
+        return dt.strftime("%b %d, %I:%M %p")
+    except:
+        return dt_str
+
+def format_task(job):
+    """Format task description based on operation"""
+    if not job:
+        return '-'
+    
+    operation = job.get('operation', 'sum')
+    a = job.get('a', 0)
+    b = job.get('b', 0)
+    
+    operation_symbols = {
+        'sum': '+',
+        'subtract': '−',
+        'multiply': '×',
+        'divide': '÷'
+    }
+    
+    symbol = operation_symbols.get(operation, '+')
+    return f"{a} {symbol} {b}"
+
 # Add filters to Jinja2 environment
 templates.env.filters['format_number'] = format_number
 templates.env.filters['get_status_badge'] = get_status_badge
+templates.env.filters['get_operation_badge'] = get_operation_badge
+templates.env.filters['format_datetime'] = format_datetime
+templates.env.filters['format_task'] = format_task
 
 # Admin authentication
 async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -128,7 +178,7 @@ async def health_check():
 async def dashboard(request: Request):
     try:
         # Make parallel requests to main server
-        metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics/summary")
+        metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics")
         bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots?include_deleted=true")
         recent_jobs_task = make_request(f"{config.MAIN_SERVER_URL}/jobs?limit=10")
         
@@ -142,7 +192,13 @@ async def dashboard(request: Request):
             metrics_task, bots_task, recent_jobs_task, pending_jobs_task, processing_jobs_task, succeeded_jobs_task, failed_jobs_task
         )
         
-        # Combine all jobs for the dashboard
+        # Combine all jobs for the dashboard (ensure all values are lists)
+        pending_jobs = pending_jobs or []
+        processing_jobs = processing_jobs or []
+        succeeded_jobs = succeeded_jobs or []
+        failed_jobs = failed_jobs or []
+        recent_jobs = recent_jobs or []
+        bots = bots or []
         all_jobs = pending_jobs + processing_jobs + succeeded_jobs + failed_jobs
         
         return templates.TemplateResponse("dashboard.html", {
@@ -222,7 +278,7 @@ async def bot_detail(request: Request, bot_id: str):
 
 # Jobs list page
 @app.get("/jobs", response_class=HTMLResponse)
-async def jobs_page(request: Request, status: str = "", limit: int = 50, offset: int = 0):
+async def jobs_page(request: Request, status: str = "", limit: int = 50, offset: int = 0, sort: str = "default"):
     try:
         url = f"{config.MAIN_SERVER_URL}/jobs?limit={limit}&offset={offset}"
         if status:
@@ -230,10 +286,27 @@ async def jobs_page(request: Request, status: str = "", limit: int = 50, offset:
         
         jobs = await make_request(url)
         
+        # Apply custom sorting based on sort parameter
+        if sort == "default":
+            # Default: DO NOT re-sort! The backend already sorted correctly
+            # Backend sorts: ALL pending first across all pages, then finished
+            pass  # Keep the backend's sorting order
+        elif sort == "created_desc":
+            # Sort by created time (newest first)
+            jobs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        elif sort == "created_asc":
+            # Sort by created time (oldest first)
+            jobs.sort(key=lambda x: x.get('created_at', ''))
+        elif sort == "status":
+            # Sort by status
+            status_order = {'pending': 0, 'claimed': 1, 'processing': 2, 'succeeded': 3, 'failed': 4}
+            jobs.sort(key=lambda x: status_order.get(x['status'], 5))
+        
         return templates.TemplateResponse("jobs.html", {
             "request": request,
             "jobs": jobs,
             "currentStatus": status,
+            "currentSort": sort,
             "title": "Job Management",
             "pagination": {
                 "limit": limit,
@@ -586,6 +659,35 @@ async def reset_bots():
         logger.error(f"Reset bots error: {e}")
         raise HTTPException(status_code=500, detail="Failed to reset bots")
 
+# Operations endpoints
+@app.get("/api/operations")
+async def get_operations():
+    try:
+        result = await make_request(f"{config.MAIN_SERVER_URL}/operations", "GET")
+        return result
+    except Exception as e:
+        logger.error(f"Get operations error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get operations")
+
+# Bot operation assignment
+class BotOperationAssignment(BaseModel):
+    operation: Optional[str] = None
+
+@app.post("/api/bots/{bot_id}/assign-operation")
+async def assign_bot_operation(bot_id: str, assignment: BotOperationAssignment):
+    try:
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        result = await make_request(
+            f"{config.MAIN_SERVER_URL}/bots/{bot_id}/assign-operation",
+            "POST",
+            {"operation": assignment.operation},
+            headers
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Assign operation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to assign operation")
+
 # Manually populate jobs
 @app.post("/jobs/populate")
 async def populate_jobs(job_data: JobPopulate):
@@ -594,7 +696,7 @@ async def populate_jobs(job_data: JobPopulate):
         result = await make_request(
             f"{config.MAIN_SERVER_URL}/jobs/populate",
             "POST",
-            {"batchSize": job_data.batchSize},
+            {"batchSize": job_data.batchSize, "operation": job_data.operation},
             headers
         )
         
@@ -604,11 +706,39 @@ async def populate_jobs(job_data: JobPopulate):
         logger.error(f"Populate jobs error: {e}")
         raise HTTPException(status_code=500, detail="Failed to populate jobs")
 
+# Operations endpoint
+@app.get("/api/operations")
+async def get_operations():
+    """Get available operations from main server"""
+    try:
+        operations = await make_request(f"{config.MAIN_SERVER_URL}/operations")
+        return operations
+    except Exception as e:
+        logger.error(f"Failed to get operations: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get operations")
+
+# Bot operation assignment endpoint
+@app.post("/api/bots/{bot_id}/assign-operation")
+async def assign_bot_operation(bot_id: str, assignment_data: BotAssignOperation):
+    """Assign or unassign an operation to a bot"""
+    try:
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        result = await make_request(
+            f"{config.MAIN_SERVER_URL}/bots/{bot_id}/assign-operation",
+            "POST",
+            {"operation": assignment_data.operation},
+            headers
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to assign operation to bot {bot_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to assign operation")
+
 # API endpoint for real-time data
 @app.get("/api/metrics")
 async def get_metrics():
     try:
-        metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics/summary")
+        metrics_task = make_request(f"{config.MAIN_SERVER_URL}/metrics")
         bots_task = make_request(f"{config.MAIN_SERVER_URL}/bots?include_deleted=true")
         
         metrics, bots = await asyncio.gather(metrics_task, bots_task)
@@ -836,6 +966,183 @@ async def reset_bot_via_dashboard(bot_id: str):
     except Exception as e:
         logger.error(f"Bot reset operation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Bot reset failed: {str(e)}")
+
+# New job release and bot restart endpoints for manual intervention
+@app.post("/api/jobs/{job_id}/release")
+async def release_job_via_dashboard(job_id: str):
+    """Release a stuck job back to pending state"""
+    try:
+        # Call main server job release endpoint
+        url = f"{config.MAIN_SERVER_URL}/jobs/{job_id}/release"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Job release failed: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Job release operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Job release failed: {str(e)}")
+
+@app.post("/api/bots/{bot_id}/restart")
+async def restart_bot_via_dashboard(bot_id: str):
+    """Mark a bot for restart and release any current job"""
+    try:
+        # Call main server bot restart endpoint
+        url = f"{config.MAIN_SERVER_URL}/bots/{bot_id}/restart"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Bot restart failed: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bot restart operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bot restart failed: {str(e)}")
+
+@app.get("/api/admin/stuck-jobs")
+async def get_stuck_jobs_summary():
+    """Get summary of potentially stuck jobs"""
+    try:
+        # Call main server stuck jobs endpoint
+        url = f"{config.MAIN_SERVER_URL}/admin/stuck-jobs"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Failed to get stuck jobs: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get stuck jobs operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get stuck jobs: {str(e)}")
+
+@app.post("/api/clear-all-data")
+async def clear_all_data():
+    """Complete system reset - clear all jobs, results, and reset bots"""
+    try:
+        deleted_jobs = 0
+        reset_bots = 0
+        cleared_files = 0
+        errors = []
+        
+        logger.info("Starting complete system clear operation")
+        
+        # Step 1: Reset all bots to stop processing
+        try:
+            url = f"{config.MAIN_SERVER_URL}/bots/reset"
+            headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers) as response:
+                    if response.status == 200:
+                        bot_result = await response.json()
+                        reset_bots = bot_result.get("reset_bots", 0)
+                        logger.info(f"Reset {reset_bots} bots")
+                    else:
+                        error_text = await response.text()
+                        errors.append(f"Bot reset failed: {error_text}")
+        except Exception as e:
+            errors.append(f"Bot reset failed: {str(e)}")
+            logger.error(f"Bot reset failed: {e}")
+        
+        # Step 2: Delete all jobs from database
+        try:
+            # Use docker exec to connect to postgres and delete jobs
+            process = await asyncio.create_subprocess_exec(
+                "docker", "exec", "distributed-system-test-postgres-1", 
+                "psql", "-U", "ds_user", "-d", "distributed_system", 
+                "-c", "DELETE FROM jobs;",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                # Parse the DELETE result to get count
+                output = stdout.decode().strip()
+                if "DELETE" in output:
+                    try:
+                        deleted_jobs = int(output.split("DELETE ")[1])
+                    except:
+                        deleted_jobs = 0  # If parsing fails, assume 0
+                logger.info(f"Deleted {deleted_jobs} jobs from database")
+            else:
+                error_msg = stderr.decode() if stderr else "Database deletion failed"
+                errors.append(f"Job deletion failed: {error_msg}")
+                logger.error(f"Job deletion failed: {error_msg}")
+        except Exception as e:
+            errors.append(f"Job deletion failed: {str(e)}")
+            logger.error(f"Job deletion failed: {e}")
+        
+        # Step 3: Clear datalake result files
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "docker", "exec", "distributed-system-test-main-server-1", 
+                "sh", "-c", "ls /app/datalake/data/*.ndjson 2>/dev/null | wc -l",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                try:
+                    cleared_files = int(stdout.decode().strip())
+                except:
+                    cleared_files = 0
+            
+            # Actually delete the files
+            process = await asyncio.create_subprocess_exec(
+                "docker", "exec", "distributed-system-test-main-server-1", 
+                "sh", "-c", "rm -f /app/datalake/data/*.ndjson",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            await process.communicate()
+            logger.info(f"Cleared {cleared_files} result files from datalake")
+        except Exception as e:
+            errors.append(f"Datalake cleanup failed: {str(e)}")
+            logger.error(f"Datalake cleanup failed: {e}")
+        
+        # Return results
+        result = {
+            "status": "success" if not errors else "partial",
+            "deleted_jobs": deleted_jobs,
+            "reset_bots": reset_bots,
+            "cleared_files": cleared_files,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        if errors:
+            result["errors"] = errors
+            result["status"] = "partial" if (deleted_jobs > 0 or reset_bots > 0) else "failed"
+        
+        logger.info(f"System clear operation completed: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Clear all data operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Clear operation failed: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

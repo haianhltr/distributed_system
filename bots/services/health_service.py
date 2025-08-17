@@ -2,8 +2,8 @@
 
 import logging
 from typing import List, Tuple, Callable, Awaitable
-from .http_client import HttpClient
-from ..config.settings import BotConfig
+from services.http_client import HttpClient
+from config.settings import BotConfig
 
 logger = logging.getLogger(__name__)
 

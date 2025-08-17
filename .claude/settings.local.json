@@ -35,7 +35,12 @@
       "Bash(ls:*)",
       "Bash(psql:*)",
       "Bash(docker stop:*)",
-      "Bash(docker rm:*)"
+      "Bash(docker rm:*)",
+      "Bash(docker restart:*)",
+      "Bash(timeout:*)",
+      "Bash(echo:*)",
+      "Bash(docker:*)",
+      "Bash(touch:*)"
     ],
     "deny": []
   }

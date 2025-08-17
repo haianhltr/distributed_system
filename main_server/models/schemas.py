@@ -21,7 +21,7 @@ class JobStart(BaseModel):
 
 class JobComplete(BaseModel):
     bot_id: str = Field(..., min_length=1, description="Bot identifier")
-    sum: int = Field(..., description="Sum of a and b")
+    result: int = Field(..., description="Result of the operation")
     duration_ms: int = Field(..., ge=0, description="Processing duration in milliseconds")
 
 
@@ -40,6 +40,7 @@ class BotHeartbeat(BaseModel):
 
 class JobPopulate(BaseModel):
     batchSize: int = Field(default=5, ge=1, le=100, description="Number of jobs to create")
+    operation: Optional[str] = Field(default=None, description="Specific operation to create jobs for (random if not specified)")
 
 
 class ScaleUp(BaseModel):

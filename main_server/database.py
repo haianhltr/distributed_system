@@ -31,6 +31,7 @@ class DatabaseManager:
                     id TEXT PRIMARY KEY,
                     a INTEGER NOT NULL,
                     b INTEGER NOT NULL,
+                    operation TEXT NOT NULL DEFAULT 'sum',
                     status TEXT NOT NULL CHECK (status IN ('pending', 'claimed', 'processing', 'succeeded', 'failed')),
                     claimed_by TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -38,16 +39,21 @@ class DatabaseManager:
                     started_at TIMESTAMP,
                     finished_at TIMESTAMP,
                     attempts INTEGER DEFAULT 0,
-                    error TEXT
+                    error TEXT,
+                    version INTEGER DEFAULT 1
                 );
 
                 CREATE TABLE IF NOT EXISTS bots (
                     id TEXT PRIMARY KEY,
                     status TEXT NOT NULL CHECK (status IN ('idle', 'busy', 'down')),
                     current_job_id TEXT,
+                    assigned_operation TEXT,
                     last_heartbeat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    deleted_at TIMESTAMP
+                    deleted_at TIMESTAMP,
+                    health_status TEXT DEFAULT 'normal' CHECK (health_status IN ('normal', 'potentially_stuck', 'unhealthy')),
+                    stuck_job_id TEXT,
+                    health_checked_at TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS results (
@@ -55,7 +61,8 @@ class DatabaseManager:
                     job_id TEXT NOT NULL,
                     a INTEGER NOT NULL,
                     b INTEGER NOT NULL,
-                    sum INTEGER NOT NULL,
+                    operation TEXT NOT NULL,
+                    result INTEGER NOT NULL,
                     processed_by TEXT NOT NULL,
                     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     duration_ms INTEGER NOT NULL,
@@ -67,10 +74,15 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
                 CREATE INDEX IF NOT EXISTS idx_jobs_claimed_by ON jobs(claimed_by);
                 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+                CREATE INDEX IF NOT EXISTS idx_jobs_operation_status_created ON jobs(operation, status, created_at) WHERE status = 'pending';
+                CREATE INDEX IF NOT EXISTS idx_jobs_processing_duration ON jobs(started_at) WHERE status = 'processing';
                 CREATE INDEX IF NOT EXISTS idx_bots_status ON bots(status);
                 CREATE INDEX IF NOT EXISTS idx_bots_heartbeat ON bots(last_heartbeat_at);
+                CREATE INDEX IF NOT EXISTS idx_bots_assigned_operation ON bots(assigned_operation) WHERE assigned_operation IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_bots_health_status ON bots(health_status);
                 CREATE INDEX IF NOT EXISTS idx_results_job_id ON results(job_id);
                 CREATE INDEX IF NOT EXISTS idx_results_processed_at ON results(processed_at);
+                CREATE INDEX IF NOT EXISTS idx_results_operation ON results(operation);
 
                 -- Ensure atomic job claiming
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_current_job ON bots(current_job_id) WHERE current_job_id IS NOT NULL;

@@ -99,7 +99,7 @@ class JobStart(BaseModel):
 
 class JobComplete(BaseModel):
     bot_id: str
-    sum: int
+    result: int
     duration_ms: int
 
 class JobFail(BaseModel):
@@ -114,6 +114,7 @@ class BotHeartbeat(BaseModel):
 
 class JobPopulate(BaseModel):
     batchSize: int = 5
+    operation: str = "sum"  # Add operation field with default
 
 class ScaleUp(BaseModel):
     count: int = 1
@@ -204,6 +205,16 @@ async def populate_jobs(
 ):
     """Create a batch of new jobs"""
     batch_size = job_data.batchSize
+    operation = job_data.operation  # Get operation from request
+    
+    # Validate operation is supported
+    valid_operations = ['sum', 'subtract', 'multiply', 'divide']
+    if operation not in valid_operations:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid operation: {operation}. Must be one of: {valid_operations}"
+        )
+    
     jobs = []
     
     try:
@@ -212,17 +223,24 @@ async def populate_jobs(
                 for i in range(batch_size):
                     job_id = str(uuid.uuid4())
                     a = random.randint(0, 999)
-                    b = random.randint(0, 999)
                     
+                    # Handle division by zero prevention
+                    if operation == 'divide':
+                        b = random.randint(1, 999)  # Avoid b = 0
+                    else:
+                        b = random.randint(0, 999)
+                    
+                    # FIXED: Include operation field in INSERT
                     await conn.execute("""
-                        INSERT INTO jobs (id, a, b, status, created_at) 
-                        VALUES ($1, $2, $3, 'pending', CURRENT_TIMESTAMP)
-                    """, job_id, a, b)
+                        INSERT INTO jobs (id, a, b, operation, status, created_at) 
+                        VALUES ($1, $2, $3, $4, 'pending', CURRENT_TIMESTAMP)
+                    """, job_id, a, b, operation)
                     
-                    jobs.append({"id": job_id, "a": a, "b": b})
+                    # FIXED: Include operation in response
+                    jobs.append({"id": job_id, "a": a, "b": b, "operation": operation})
         
-        logger.info("Created new jobs", count=batch_size)
-        return {"created": batch_size, "jobs": jobs}
+        logger.info("Created new jobs", count=batch_size, operation=operation)
+        return {"created": batch_size, "jobs": jobs, "operation": operation}
         
     except Exception as e:
         logger.error("Failed to populate jobs", error=str(e))
@@ -247,7 +265,16 @@ async def get_jobs(
             else:
                 jobs = await conn.fetch("""
                     SELECT * FROM jobs 
-                    ORDER BY created_at DESC 
+                    ORDER BY 
+                        CASE status
+                            WHEN 'pending' THEN 1
+                            WHEN 'claimed' THEN 2  
+                            WHEN 'processing' THEN 3
+                            WHEN 'succeeded' THEN 4
+                            WHEN 'failed' THEN 5
+                            ELSE 6
+                        END,
+                        created_at DESC
                     LIMIT $1 OFFSET $2
                 """, limit, offset)
             
@@ -277,7 +304,7 @@ async def get_job(job_id: str):
 
 @app.post("/jobs/claim")
 async def claim_job(claim_data: JobClaim):
-    """Atomically claim a job for a bot using FOR UPDATE SKIP LOCKED"""
+    """Atomically claim a job for a bot"""
     bot_id = claim_data.bot_id
     
     try:
@@ -286,49 +313,39 @@ async def claim_job(claim_data: JobClaim):
                 # Check if bot already has a job
                 existing_job = await conn.fetchval("""
                     SELECT current_job_id FROM bots 
-                    WHERE id = $1 AND current_job_id IS NOT NULL AND deleted_at IS NULL
+                    WHERE id = $1 AND current_job_id IS NOT NULL
                 """, bot_id)
                 
                 if existing_job:
                     raise HTTPException(status_code=409, detail="Bot already has an active job")
                 
-                # RACE-CONDITION-PROOF: Atomically claim job using FOR UPDATE SKIP LOCKED
-                # This is the single most important fix - prevents all race conditions
-                claimed_job = await conn.fetchrow("""
-                    UPDATE jobs 
-                    SET status = 'claimed', 
-                        claimed_by = $1, 
-                        claimed_at = NOW(),
-                        version = version + 1
-                    WHERE id = (
-                        SELECT id FROM jobs 
-                        WHERE status = 'pending' 
-                        ORDER BY created_at ASC 
-                        FOR UPDATE SKIP LOCKED  -- Skip jobs locked by other transactions
-                        LIMIT 1
-                    )
-                    AND status = 'pending'  -- Double-check status hasn't changed
-                    RETURNING id, a, b, status, claimed_by, claimed_at, version
-                """, bot_id)
+                # Find first available job
+                available_job = await conn.fetchrow("""
+                    SELECT * FROM jobs 
+                    WHERE status = 'pending' 
+                    ORDER BY created_at ASC 
+                    LIMIT 1
+                """)
                 
-                if not claimed_job:
+                if not available_job:
                     raise HTTPException(status_code=204, detail="No jobs available")
                 
-                # Update bot's current job - this will fail if constraints are violated
-                result = await conn.execute("""
+                job_dict = dict(available_job)
+                
+                # Claim the job
+                await conn.execute("""
+                    UPDATE jobs 
+                    SET status = 'claimed', claimed_by = $1, claimed_at = NOW()
+                    WHERE id = $2 AND status = 'pending'
+                """, bot_id, job_dict['id'])
+                
+                # Update bot's current job
+                await conn.execute("""
                     UPDATE bots 
                     SET current_job_id = $1, status = 'busy'
-                    WHERE id = $2 AND deleted_at IS NULL
-                """, claimed_job['id'], bot_id)
+                    WHERE id = $2
+                """, job_dict['id'], bot_id)
                 
-                # Verify bot update succeeded
-                if result == 'UPDATE 0':
-                    # This should not happen due to the existing_job check above,
-                    # but we handle it gracefully
-                    raise HTTPException(status_code=404, detail="Bot not found or deleted")
-                
-                job_dict = dict(claimed_job)
-                logger.info(f"Job {claimed_job['id']} successfully claimed by bot {bot_id}")
                 return job_dict
             
     except HTTPException:
@@ -365,7 +382,7 @@ async def start_job(job_id: str, start_data: JobStart):
 async def complete_job(job_id: str, complete_data: JobComplete):
     """Mark job as completed successfully"""
     bot_id = complete_data.bot_id
-    sum_result = complete_data.sum
+    result = complete_data.result
     duration_ms = complete_data.duration_ms
     
     try:
@@ -392,9 +409,9 @@ async def complete_job(job_id: str, complete_data: JobComplete):
                 # Create result record
                 result_id = str(uuid.uuid4())
                 await conn.execute("""
-                    INSERT INTO results (id, job_id, a, b, sum, processed_by, processed_at, duration_ms, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, 'succeeded')
-                """, result_id, job_id, job_dict['a'], job_dict['b'], sum_result, bot_id, duration_ms)
+                    INSERT INTO results (id, job_id, a, b, operation, result, processed_by, processed_at, duration_ms, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, 'succeeded')
+                """, result_id, job_id, job_dict['a'], job_dict['b'], job_dict['operation'], result, bot_id, duration_ms)
                 
                 # Clear bot's current job
                 await conn.execute("""
@@ -409,7 +426,8 @@ async def complete_job(job_id: str, complete_data: JobComplete):
                     "job_id": job_id,
                     "a": job_dict['a'],
                     "b": job_dict['b'],
-                    "sum": sum_result,
+                    "operation": job_dict['operation'],
+                    "result": result,
                     "processed_by": bot_id,
                     "processed_at": datetime.utcnow().isoformat(),
                     "duration_ms": duration_ms,
@@ -454,9 +472,9 @@ async def fail_job(job_id: str, fail_data: JobFail):
                 # Create result record
                 result_id = str(uuid.uuid4())
                 await conn.execute("""
-                    INSERT INTO results (id, job_id, a, b, sum, processed_by, processed_at, duration_ms, status, error)
-                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, 'failed', $8)
-                """, result_id, job_id, job_dict['a'], job_dict['b'], 0, bot_id, 0, error)
+                    INSERT INTO results (id, job_id, a, b, operation, result, processed_by, processed_at, duration_ms, status, error)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, 'failed', $9)
+                """, result_id, job_id, job_dict['a'], job_dict['b'], job_dict['operation'], 0, bot_id, 0, error)
                 
                 # Clear bot's current job
                 await conn.execute("""
@@ -471,7 +489,8 @@ async def fail_job(job_id: str, fail_data: JobFail):
                     "job_id": job_id,
                     "a": job_dict['a'],
                     "b": job_dict['b'],
-                    "sum": 0,
+                    "operation": job_dict['operation'],
+                    "result": 0,
                     "processed_by": bot_id,
                     "processed_at": datetime.utcnow().isoformat(),
                     "duration_ms": 0,
@@ -739,8 +758,8 @@ async def get_bot_stats(bot_id: str, hours: int = 24):
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
                 FROM results 
                 WHERE processed_by = $1 
-                AND processed_at > NOW() - INTERVAL '{} hours'
-            """.format(hours), bot_id)
+                AND processed_at > NOW() - make_interval(hours => $2)
+            """, bot_id, hours)
             
             # Hourly performance for the last 24 hours (for graphing)
             hourly_stats = await conn.fetch("""
@@ -966,6 +985,179 @@ async def reset_bot_state(bot_id: str):
         logger.error(f"Failed to reset bot {bot_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
+# Job release endpoints for manual intervention
+@app.post("/jobs/{job_id}/release", dependencies=[Depends(verify_admin_token)])
+async def release_job(job_id: str):
+    """Manually release a stuck job back to pending state"""
+    try:
+        async with db_manager.get_connection() as conn:
+            async with conn.transaction():
+                # Get job and bot info
+                job_info = await conn.fetchrow("""
+                    SELECT j.*, b.id as bot_id
+                    FROM jobs j
+                    LEFT JOIN bots b ON j.claimed_by = b.id
+                    WHERE j.id = $1
+                """, job_id)
+                
+                if not job_info:
+                    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+                
+                job_dict = dict(job_info)
+                bot_id = job_dict.get('bot_id')
+                
+                # Validate job is in a releasable state
+                if job_dict['status'] not in ['claimed', 'processing']:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Job {job_id} is in {job_dict['status']} state and cannot be released"
+                    )
+                
+                # Reset job to pending
+                await conn.execute("""
+                    UPDATE jobs 
+                    SET status = 'pending', 
+                        claimed_by = NULL, 
+                        claimed_at = NULL,
+                        started_at = NULL,
+                        error = CASE 
+                            WHEN error IS NULL THEN 'Manually released from stuck state'
+                            ELSE error || ' | Manually released from stuck state'
+                        END
+                    WHERE id = $1
+                """, job_id)
+                
+                # Reset bot state if it exists
+                if bot_id:
+                    await conn.execute("""
+                        UPDATE bots 
+                        SET current_job_id = NULL, 
+                            status = 'idle',
+                            health_status = 'normal',
+                            stuck_job_id = NULL
+                        WHERE id = $1
+                    """, bot_id)
+                
+                logger.info(f"Manually released stuck job: {job_id} from bot: {bot_id}")
+                
+                return {
+                    "status": "released",
+                    "job_id": job_id,
+                    "bot_id": bot_id,
+                    "message": f"Job {job_id} has been released back to pending state"
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to release job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to release job: {str(e)}")
+
+@app.post("/bots/{bot_id}/restart", dependencies=[Depends(verify_admin_token)])
+async def restart_bot(bot_id: str):
+    """Mark a bot for restart and release any current job"""
+    try:
+        async with db_manager.get_connection() as conn:
+            async with conn.transaction():
+                # Get bot info
+                bot_info = await conn.fetchrow("""
+                    SELECT * FROM bots WHERE id = $1
+                """, bot_id)
+                
+                if not bot_info:
+                    raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+                
+                bot_dict = dict(bot_info)
+                
+                # Mark bot as down
+                await conn.execute("""
+                    UPDATE bots 
+                    SET status = 'down',
+                        health_status = 'normal',
+                        stuck_job_id = NULL
+                    WHERE id = $1
+                """, bot_id)
+                
+                # If bot had a job, release it
+                if bot_dict['current_job_id']:
+                    await conn.execute("""
+                        UPDATE jobs 
+                        SET status = 'pending', 
+                            claimed_by = NULL, 
+                            claimed_at = NULL,
+                            started_at = NULL,
+                            error = 'Bot restarted - job released'
+                        WHERE id = $1 AND claimed_by = $2
+                    """, bot_dict['current_job_id'], bot_id)
+                
+                logger.info(f"Manually restarted bot: {bot_id}")
+                
+                return {
+                    "status": "restarted",
+                    "bot_id": bot_id,
+                    "released_job_id": bot_dict['current_job_id'],
+                    "message": f"Bot {bot_id} has been marked for restart"
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restart bot {bot_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to restart bot: {str(e)}")
+
+@app.get("/admin/stuck-jobs", dependencies=[Depends(verify_admin_token)])
+async def get_stuck_jobs():
+    """Get summary of potentially stuck jobs"""
+    try:
+        async with db_manager.get_connection() as conn:
+            # Get stuck processing jobs (>10 minutes)
+            stuck_processing = await conn.fetch("""
+                SELECT j.id, j.status, j.claimed_by,
+                       EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 as processing_minutes,
+                       b.health_status
+                FROM jobs j
+                LEFT JOIN bots b ON j.claimed_by = b.id
+                WHERE j.status = 'processing'
+                AND j.started_at < NOW() - INTERVAL '10 minutes'
+                ORDER BY j.started_at ASC
+                LIMIT 20
+            """)
+            
+            # Get stuck claimed jobs (>5 minutes)
+            stuck_claimed = await conn.fetch("""
+                SELECT j.id, j.status, j.claimed_by,
+                       EXTRACT(EPOCH FROM (NOW() - j.claimed_at)) / 60 as claimed_minutes
+                FROM jobs j
+                WHERE j.status = 'claimed'
+                AND j.claimed_at < NOW() - INTERVAL '5 minutes'
+                ORDER BY j.claimed_at ASC
+                LIMIT 20
+            """)
+            
+            # Get bots marked as potentially stuck
+            stuck_bots = await conn.fetch("""
+                SELECT id, current_job_id, stuck_job_id
+                FROM bots
+                WHERE health_status = 'potentially_stuck'
+                ORDER BY health_checked_at DESC NULLS LAST
+                LIMIT 20
+            """)
+            
+            return {
+                "stuck_processing_jobs": [dict(job) for job in stuck_processing],
+                "stuck_claimed_jobs": [dict(job) for job in stuck_claimed],
+                "potentially_stuck_bots": [dict(bot) for bot in stuck_bots],
+                "summary": {
+                    "processing_count": len(stuck_processing),
+                    "claimed_count": len(stuck_claimed),
+                    "stuck_bots_count": len(stuck_bots)
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get stuck jobs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get stuck jobs: {str(e)}")
+
 # Automatic orphaned job recovery
 async def recover_orphaned_jobs():
     """Recover jobs claimed by dead bots"""
@@ -1028,14 +1220,23 @@ async def auto_populate_jobs():
                     for i in range(config.BATCH_SIZE):
                         job_id = str(uuid.uuid4())
                         a = random.randint(0, 999)
-                        b = random.randint(0, 999)
                         
+                        # Randomly select operation for variety
+                        operation = random.choice(['sum', 'subtract', 'multiply', 'divide'])
+                        
+                        # Handle division by zero prevention
+                        if operation == 'divide':
+                            b = random.randint(1, 999)  # Avoid b = 0
+                        else:
+                            b = random.randint(0, 999)
+                        
+                        # FIXED: Include operation field in INSERT
                         await conn.execute("""
-                            INSERT INTO jobs (id, a, b, status, created_at) 
-                            VALUES ($1, $2, $3, 'pending', CURRENT_TIMESTAMP)
-                        """, job_id, a, b)
+                            INSERT INTO jobs (id, a, b, operation, status, created_at) 
+                            VALUES ($1, $2, $3, $4, 'pending', CURRENT_TIMESTAMP)
+                        """, job_id, a, b, operation)
             
-            logger.info(f"Auto-created {config.BATCH_SIZE} jobs")
+            logger.info(f"Auto-created {config.BATCH_SIZE} jobs with random operations")
             
         except Exception as e:
             logger.error(f"Failed to auto-populate jobs: {e}")

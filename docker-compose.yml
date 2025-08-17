@@ -76,7 +76,7 @@ services:
       - BOT_ID=bot-docker-1
       - MAIN_SERVER_URL=http://main-server:3001
       - HEARTBEAT_INTERVAL_MS=30000
-      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - PROCESSING_DURATION_MS=5000  # 5 seconds
       - FAILURE_RATE=0.15
     depends_on:
       main-server:
@@ -91,7 +91,7 @@ services:
       - BOT_ID=bot-docker-2
       - MAIN_SERVER_URL=http://main-server:3001
       - HEARTBEAT_INTERVAL_MS=30000
-      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - PROCESSING_DURATION_MS=5000  # 5 seconds
       - FAILURE_RATE=0.15
     depends_on:
       main-server:
@@ -106,7 +106,7 @@ services:
       - BOT_ID=bot-docker-3
       - MAIN_SERVER_URL=http://main-server:3001
       - HEARTBEAT_INTERVAL_MS=30000
-      - PROCESSING_DURATION_MS=300000  # 5 minutes
+      - PROCESSING_DURATION_MS=5000  # 5 seconds
       - FAILURE_RATE=0.15
     depends_on:
       main-server:

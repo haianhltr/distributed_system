@@ -5,13 +5,14 @@ import time
 import random
 import logging
 from typing import Optional, Dict, Any
-from ..models.enums import BotState
-from ..models.schemas import JobData, BotMetrics
-from ..config.settings import BotConfig
-from .http_client import HttpClient
-from .health_service import HealthService
-from ..utils.retry import RetryHandler
-from ..models.schemas import RetryConfig
+from models.enums import BotState
+from models.schemas import JobData, BotMetrics
+from config.settings import BotConfig
+from services.http_client import HttpClient
+from services.health_service import HealthService
+from services.operation_service import OperationService
+from utils.retry import RetryHandler
+from models.schemas import RetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class BotService:
         # Services
         self.http_client = HttpClient(config)
         self.health_service = HealthService(config, self.http_client)
+        self.operation_service = OperationService()
         self.retry_handler = RetryHandler(RetryConfig(
             max_attempts=config.retry_max_attempts,
             base_delay=config.retry_base_delay,
@@ -64,6 +66,9 @@ class BotService:
         try:
             # Initialize HTTP client
             await self.http_client.initialize()
+            
+            # Load operation plugins
+            self.operation_service.load_operations()
             
             # Start state monitor
             self.state_monitor_task = asyncio.create_task(self._state_monitor())
@@ -285,6 +290,7 @@ class BotService:
                 id=job_data['id'],
                 a=job_data['a'],
                 b=job_data['b'],
+                operation=job_data.get('operation', 'sum'),
                 status=job_data.get('status')
             )
             
@@ -337,8 +343,20 @@ class BotService:
         if should_fail:
             await self.http_client.fail_job(self.current_job.id, "Random processing failure")
         else:
-            sum_result = self.current_job.a + self.current_job.b
-            await self.http_client.complete_job(self.current_job.id, sum_result, duration_ms)
+            try:
+                # Execute the operation using the plugin system
+                result = self.operation_service.execute_operation(
+                    self.current_job.operation,
+                    self.current_job.a,
+                    self.current_job.b
+                )
+                await self.http_client.complete_job(self.current_job.id, result, duration_ms)
+                logger.info(f"Job {self.current_job.id} completed: {self.current_job.a} {self.current_job.operation} {self.current_job.b} = {result}")
+            except Exception as e:
+                # Operation execution failed
+                error_msg = f"Operation '{self.current_job.operation}' failed: {str(e)}"
+                logger.error(error_msg)
+                await self.http_client.fail_job(self.current_job.id, error_msg)
     
     def get_metrics(self) -> BotMetrics:
         """Get bot metrics for observability."""
