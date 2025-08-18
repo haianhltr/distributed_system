@@ -38,6 +38,10 @@ class BotHeartbeat(BaseModel):
     bot_id: str = Field(..., min_length=1, description="Bot identifier")
 
 
+class BotAssignOperation(BaseModel):
+    operation: str = Field(..., pattern="^(sum|subtract|multiply|divide)$", description="Operation to assign to bot")
+
+
 class JobPopulate(BaseModel):
     batchSize: int = Field(default=5, ge=1, le=100, description="Number of jobs to create")
     operation: Optional[str] = Field(default=None, description="Specific operation to create jobs for (random if not specified)")

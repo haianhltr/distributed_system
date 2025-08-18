@@ -434,6 +434,25 @@
                         </table>
                     </div>
                 </div>
+                
+                <!-- System Management -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">System Management</h3>
+                    <div class="space-y-3">
+                        <button onclick="resetAllBots()" 
+                                class="w-full bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700">
+                            Reset All Bots
+                        </button>
+                        <button onclick="cleanupInconsistentStates()" 
+                                class="w-full bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">
+                            Cleanup Inconsistent States
+                        </button>
+                        <button onclick="clearAllData()" 
+                                class="w-full bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                            Clear All Data
+                        </button>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -742,6 +761,31 @@
                 row.style.display = 'none';
             }
         });
+    }
+    
+    // Cleanup inconsistent states function
+    async function cleanupInconsistentStates() {
+        if (!confirm('This will fix any inconsistent bot-job states. Continue?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/admin/cleanup-inconsistent-states', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Cleanup completed: ${result.message}`);
+                location.reload(); // Refresh the page to show updated status
+            } else {
+                const error = await response.json();
+                alert(`Failed to cleanup: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Cleanup error:', error);
+            alert('Failed to cleanup: Network error');
+        }
     }
     </script>
 </body>

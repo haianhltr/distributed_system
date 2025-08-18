@@ -40,7 +40,9 @@
       "Bash(timeout:*)",
       "Bash(echo:*)",
       "Bash(docker:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(pip show:*)",
+      "Bash(pytest:*)"
     ],
     "deny": []
   }

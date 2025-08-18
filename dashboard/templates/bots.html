@@ -133,8 +133,12 @@
                                     {% endif %}
                                     
                                     <!-- Normal bot actions -->
+                                    <button onclick="resetBot('{{ bot.id }}')" 
+                                            class="w-full bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm mb-2">
+                                        Reset Bot
+                                    </button>
                                     <button onclick="assignOperation('{{ bot.id }}')" 
-                                            class="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+                                            class="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm mb-2">
                                         Assign Operation
                                     </button>
                                     <button onclick="deleteBot('{{ bot.id }}')" 
@@ -294,6 +298,30 @@
             } else {
                 const error = await response.json();
                 alert('Failed to restart bot: ' + error.detail);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    async function resetBot(botId) {
+        if (!confirm(`Reset bot ${botId}? This will clear its state and release any current job.`)) return;
+        
+        try {
+            const response = await fetch(`/api/bots/${botId}/reset`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer admin-secret-token'
+                }
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert(`Bot reset successful: ${result.message}`);
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert('Failed to reset bot: ' + error.detail);
             }
         } catch (error) {
             alert('Error: ' + error.message);

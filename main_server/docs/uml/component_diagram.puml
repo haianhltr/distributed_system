@@ -1,0 +1,139 @@
+@startuml Distributed System Component Diagram
+
+!define COMPONENT component
+!define INTERFACE interface
+
+package "External Systems" {
+    [Worker Bots] as Bots
+    [Admin Dashboard] as Dashboard
+    [Monitoring Tools] as Monitoring
+}
+
+package "API Gateway" {
+    [FastAPI Server] as API
+    [CORS Middleware] as CORS
+    [Authentication] as Auth
+}
+
+package "Core Services" {
+    [Job Service] as JobSvc
+    [Bot Service] as BotSvc
+    [Monitoring Service] as MonitorSvc
+    [Metrics Service] as MetricsSvc
+    [Cleanup Service] as CleanupSvc
+}
+
+package "Data Layer" {
+    [Database Manager] as DBManager
+    [Data Lake Manager] as DatalakeMgr
+    [PostgreSQL] as PostgreSQL
+    [File System] as FileSystem
+}
+
+package "Operations Engine" {
+    [Operation Interface] as OpInterface
+    [Sum Operation] as SumOp
+    [Subtract Operation] as SubtractOp
+    [Multiply Operation] as MultiplyOp
+    [Divide Operation] as DivideOp
+}
+
+package "Background Tasks" {
+    [Job Recovery Loop] as RecoveryLoop
+    [Auto-population Loop] as PopulateLoop
+    [Cleanup Scheduler] as CleanupSched
+}
+
+package "Utilities" {
+    [Logging] as Logging
+    [Error Handling] as ErrorHandling
+    [Configuration] as Config
+}
+
+' External connections
+Bots <--> API : HTTP REST API
+Dashboard <--> API : HTTP REST API
+Monitoring <--> API : HTTP REST API
+
+' API Gateway connections
+API --> CORS
+API --> Auth
+API --> JobSvc
+API --> BotSvc
+API --> MonitorSvc
+API --> MetricsSvc
+API --> CleanupSvc
+
+' Service connections
+JobSvc --> DBManager
+JobSvc --> DatalakeMgr
+JobSvc --> OpInterface
+
+BotSvc --> DBManager
+MonitorSvc --> DBManager
+MetricsSvc --> DBManager
+CleanupSvc --> DBManager
+
+' Data layer connections
+DBManager --> PostgreSQL
+DatalakeMgr --> FileSystem
+
+' Operations connections
+OpInterface <|-- SumOp
+OpInterface <|-- SubtractOp
+OpInterface <|-- MultiplyOp
+OpInterface <|-- DivideOp
+
+' Background task connections
+RecoveryLoop --> DBManager
+PopulateLoop --> DBManager
+CleanupSched --> CleanupSvc
+
+' Utility connections
+API --> Logging
+API --> ErrorHandling
+API --> Config
+
+JobSvc --> Logging
+BotSvc --> Logging
+CleanupSvc --> Logging
+
+' Database schema
+database "Database Schema" {
+    [jobs table] as JobsTable
+    [bots table] as BotsTable
+    [results table] as ResultsTable
+}
+
+DBManager --> JobsTable
+DBManager --> BotsTable
+DBManager --> ResultsTable
+
+' Data flow
+note right of Bots
+  Bot Lifecycle:
+  1. Register
+  2. Get operation assignment
+  3. Claim jobs
+  4. Process jobs
+  5. Send heartbeats
+end note
+
+note right of JobSvc
+  Job Lifecycle:
+  1. Create (pending)
+  2. Claim by bot
+  3. Start processing
+  4. Complete/fail
+  5. Store results
+end note
+
+note right of CleanupSvc
+  Cleanup Tasks:
+  1. Remove dead bots
+  2. Recover orphaned jobs
+  3. Clean old data
+  4. Container cleanup
+end note
+
+@enduml

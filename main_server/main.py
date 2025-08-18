@@ -112,6 +112,9 @@ class BotRegister(BaseModel):
 class BotHeartbeat(BaseModel):
     bot_id: str
 
+class BotAssignOperation(BaseModel):
+    operation: str
+
 class JobPopulate(BaseModel):
     batchSize: int = 5
     operation: str = "sum"  # Add operation field with default
@@ -319,13 +322,34 @@ async def claim_job(claim_data: JobClaim):
                 if existing_job:
                     raise HTTPException(status_code=409, detail="Bot already has an active job")
                 
-                # Find first available job
+                # Additional safety check: Check if bot has any jobs assigned in jobs table
+                existing_assigned_job = await conn.fetchval("""
+                    SELECT id FROM jobs 
+                    WHERE claimed_by = $1 AND status IN ('claimed', 'processing')
+                    LIMIT 1
+                """, bot_id)
+                
+                if existing_assigned_job:
+                    logger.warning(f"Bot {bot_id} has inconsistent state: bot table shows no job but jobs table shows job {existing_assigned_job}")
+                    raise HTTPException(status_code=409, detail="Bot has inconsistent job state - please reset bot first")
+                
+                # Get bot's assigned operation
+                bot_info = await conn.fetchrow("""
+                    SELECT assigned_operation FROM bots WHERE id = $1
+                """, bot_id)
+                
+                if not bot_info or not bot_info['assigned_operation']:
+                    raise HTTPException(status_code=400, detail="Bot has no assigned operation")
+                
+                assigned_operation = bot_info['assigned_operation']
+                
+                # Find first available job matching bot's assigned operation
                 available_job = await conn.fetchrow("""
                     SELECT * FROM jobs 
-                    WHERE status = 'pending' 
+                    WHERE status = 'pending' AND operation = $1
                     ORDER BY created_at ASC 
                     LIMIT 1
-                """)
+                """, assigned_operation)
                 
                 if not available_job:
                     raise HTTPException(status_code=204, detail="No jobs available")
@@ -964,6 +988,13 @@ async def reset_bot_state(bot_id: str):
     try:
         async with db_manager.get_connection() as conn:
             async with conn.transaction():
+                # Get bot's current job info before clearing
+                bot_info = await conn.fetchrow("""
+                    SELECT current_job_id FROM bots WHERE id = $1
+                """, bot_id)
+                
+                current_job_id = bot_info['current_job_id'] if bot_info else None
+                
                 # Clear any stale job assignment
                 result = await conn.execute("""
                     UPDATE bots 
@@ -971,15 +1002,35 @@ async def reset_bot_state(bot_id: str):
                     WHERE id = $1 AND current_job_id IS NOT NULL
                 """, bot_id)
                 
-                # Return jobs to pending if they were claimed by this bot
-                await conn.execute("""
+                # Return jobs to pending if they were claimed by this bot (both claimed and processing)
+                # Use claimed_by field to catch ALL jobs assigned to this bot
+                job_update_result = await conn.execute("""
                     UPDATE jobs 
-                    SET status = 'pending', claimed_by = NULL, claimed_at = NULL
-                    WHERE claimed_by = $1 AND status = 'claimed'
+                    SET status = 'pending', 
+                        claimed_by = NULL, 
+                        claimed_at = NULL,
+                        started_at = NULL,
+                        error = CASE 
+                            WHEN error IS NULL THEN 'Bot reset - job released'
+                            ELSE error || ' | Bot reset - job released'
+                        END
+                    WHERE claimed_by = $1 AND status IN ('claimed', 'processing')
                 """, bot_id)
                 
+                # Log what was actually updated
+                if job_update_result.startswith("UPDATE"):
+                    updated_count = int(job_update_result.split()[-1])
+                    logger.info(f"Reset {updated_count} jobs from bot {bot_id} back to pending")
+                else:
+                    logger.warning(f"Unexpected job update result: {job_update_result}")
+                
                 logger.info(f"Reset bot state: {bot_id}")
-                return {"status": "reset", "bot_id": bot_id}
+                return {
+                    "status": "reset", 
+                    "bot_id": bot_id, 
+                    "released_job_id": current_job_id,
+                    "jobs_updated": job_update_result
+                }
                 
     except Exception as e:
         logger.error(f"Failed to reset bot {bot_id}: {e}")
@@ -1104,6 +1155,51 @@ async def restart_bot(bot_id: str):
     except Exception as e:
         logger.error(f"Failed to restart bot {bot_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to restart bot: {str(e)}")
+
+@app.post("/bots/{bot_id}/assign-operation", dependencies=[Depends(verify_admin_token)])
+async def assign_bot_operation(bot_id: str, assignment: BotAssignOperation):
+    """Assign an operation to a bot"""
+    operation = assignment.operation
+    
+    # Validate operation
+    valid_operations = ['sum', 'subtract', 'multiply', 'divide']
+    if operation not in valid_operations:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid operation: {operation}. Must be one of: {valid_operations}"
+        )
+    
+    try:
+        async with db_manager.get_connection() as conn:
+            # Check if bot exists
+            bot_exists = await conn.fetchval("""
+                SELECT id FROM bots WHERE id = $1
+            """, bot_id)
+            
+            if not bot_exists:
+                raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+            
+            # Update bot's assigned operation
+            await conn.execute("""
+                UPDATE bots 
+                SET assigned_operation = $1
+                WHERE id = $2
+            """, operation, bot_id)
+            
+            logger.info(f"Assigned operation '{operation}' to bot {bot_id}")
+            
+            return {
+                "status": "assigned",
+                "bot_id": bot_id,
+                "operation": operation,
+                "message": f"Bot {bot_id} has been assigned to {operation} operations"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to assign operation to bot {bot_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to assign operation: {str(e)}")
 
 @app.get("/admin/stuck-jobs", dependencies=[Depends(verify_admin_token)])
 async def get_stuck_jobs():
@@ -1240,6 +1336,65 @@ async def auto_populate_jobs():
             
         except Exception as e:
             logger.error(f"Failed to auto-populate jobs: {e}")
+
+@app.post("/admin/cleanup-inconsistent-states", dependencies=[Depends(verify_admin_token)])
+async def cleanup_inconsistent_states():
+    """Clean up inconsistent bot-job states"""
+    try:
+        async with db_manager.get_connection() as conn:
+            async with conn.transaction():
+                # Find bots with inconsistent states
+                inconsistent_bots = await conn.fetch("""
+                    SELECT b.id, b.current_job_id, j.id as claimed_job_id, j.status as job_status
+                    FROM bots b
+                    LEFT JOIN jobs j ON j.claimed_by = b.id AND j.status IN ('claimed', 'processing')
+                    WHERE (b.current_job_id IS NULL AND j.id IS NOT NULL)
+                       OR (b.current_job_id IS NOT NULL AND j.id IS NULL)
+                       OR (b.current_job_id != j.id AND j.id IS NOT NULL)
+                """)
+                
+                fixed_count = 0
+                for bot in inconsistent_bots:
+                    bot_id = bot['id']
+                    bot_job_id = bot['current_job_id']
+                    claimed_job_id = bot['claimed_job_id']
+                    job_status = bot['job_status']
+                    
+                    if claimed_job_id and (bot_job_id != claimed_job_id or bot_job_id is None):
+                        # Fix inconsistent job assignment
+                        if job_status in ['claimed', 'processing']:
+                            await conn.execute("""
+                                UPDATE jobs 
+                                SET status = 'pending', 
+                                    claimed_by = NULL, 
+                                    claimed_at = NULL,
+                                    started_at = NULL,
+                                    error = CASE 
+                                        WHEN error IS NULL THEN 'Auto-cleanup: inconsistent state'
+                                        ELSE error || ' | Auto-cleanup: inconsistent state'
+                                    END
+                                WHERE id = $1
+                                """, claimed_job_id)
+                        
+                        # Reset bot state
+                        await conn.execute("""
+                            UPDATE bots 
+                            SET current_job_id = NULL, status = 'idle'
+                            WHERE id = $1
+                        """, bot_id)
+                        
+                        fixed_count += 1
+                        logger.info(f"Fixed inconsistent state for bot {bot_id}: job {claimed_job_id} reset to pending")
+                
+                return {
+                    "status": "cleanup_completed",
+                    "bots_fixed": fixed_count,
+                    "message": f"Fixed {fixed_count} inconsistent bot-job states"
+                }
+                
+    except Exception as e:
+        logger.error(f"Failed to cleanup inconsistent states: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():

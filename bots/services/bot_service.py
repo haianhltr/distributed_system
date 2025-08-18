@@ -43,6 +43,7 @@ class BotService:
         # Background tasks
         self.heartbeat_task: Optional[asyncio.Task] = None
         self.state_monitor_task: Optional[asyncio.Task] = None
+        self.connection_health_task: Optional[asyncio.Task] = None
         
         # Job processing
         self.current_job: Optional[JobData] = None
@@ -83,6 +84,9 @@ class BotService:
                 # Start heartbeat
                 self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                 
+                # Start connection health monitoring
+                self.connection_health_task = asyncio.create_task(self._connection_health_monitor())
+                
                 # Start job processing
                 await self._job_loop()
             else:
@@ -100,7 +104,7 @@ class BotService:
         self.is_running = False
         
         # Cancel background tasks
-        tasks_to_cancel = [self.heartbeat_task, self.state_monitor_task]
+        tasks_to_cancel = [self.heartbeat_task, self.state_monitor_task, self.connection_health_task]
         for task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
@@ -283,9 +287,13 @@ class BotService:
     
     async def _claim_job(self):
         """Claim a job from the main server."""
+        logger.debug(f"Attempting to claim job for bot {self.config.bot_id}")
+        logger.debug(f"Current state: {self.state.value}, time in state: {time.time() - self.state_changed_at:.1f}s")
+        
         success, job_data = await self.http_client.claim_job()
         
         if success and job_data:
+            logger.info(f"Successfully claimed job {job_data['id']}")
             self.current_job = JobData(
                 id=job_data['id'],
                 a=job_data['a'],
@@ -297,6 +305,10 @@ class BotService:
             # Change state to processing and start job
             self._change_state(BotState.PROCESSING)
             await self._process_job()
+        elif not success:
+            logger.debug(f"Failed to claim job - will retry later")
+        else:
+            logger.debug(f"No jobs available - will retry later")
     
     async def _process_job(self):
         """Process the current job."""
@@ -304,14 +316,17 @@ class BotService:
             return
         
         job_id = self.current_job.id
+        logger.info(f"Starting to process job {job_id}: {self.current_job.a} {self.current_job.operation} {self.current_job.b}")
         
         try:
             # Mark job as started
+            logger.debug(f"Marking job {job_id} as started")
             if not await self.http_client.start_job(job_id):
                 raise Exception("Failed to start job")
             
             # Simulate processing time
             start_time = time.time()
+            logger.debug(f"Processing job {job_id} for {self.config.processing_duration}s")
             await asyncio.sleep(self.config.processing_duration)
             
             # Complete processing
@@ -327,6 +342,7 @@ class BotService:
                 await self.http_client.fail_job(job_id, f"Processing error: {str(e)}")
         finally:
             # Always clean up and return to ready state
+            logger.debug(f"Cleaning up job {job_id}, returning to ready state")
             self.current_job = None
             if self.state == BotState.PROCESSING:
                 self._change_state(BotState.READY)
@@ -380,3 +396,23 @@ class BotService:
         """Log current metrics."""
         metrics = self.get_metrics()
         logger.info(f"Bot metrics: {metrics}")
+    
+    async def _connection_health_monitor(self):
+        """Monitor connection health and log detailed information."""
+        while self.is_running:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                
+                # Log connection health
+                await self.http_client.check_connection_health()
+                
+                # Log circuit breaker status
+                circuit_breakers = self.http_client.get_circuit_breaker_status()
+                logger.debug(f"Circuit breaker status: {circuit_breakers}")
+                
+            except asyncio.CancelledError:
+                logger.info("Connection health monitoring cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in connection health monitoring: {e}")
+                await asyncio.sleep(10)  # Wait before retrying

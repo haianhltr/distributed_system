@@ -1,0 +1,245 @@
+@startuml Distributed System Class Diagram
+
+!define RECTANGLE class
+
+package "Main Server" {
+    class FastAPI {
+        +app: FastAPI
+        +startup_event()
+        +shutdown_event()
+    }
+    
+    class DatabaseManager {
+        -database_url: str
+        -pool: ConnectionPool
+        +initialize()
+        +get_connection()
+        +close()
+    }
+    
+    class DatalakeManager {
+        -data_path: Path
+        -write_lock: Lock
+        +append_result(result: Dict)
+        +get_stats(days: int)
+        +export_date_as_json(date: datetime)
+    }
+    
+    class CleanupService {
+        -db_manager: DatabaseManager
+        -config: Dict
+        -_running: bool
+        -_cleanup_history: List
+        +start()
+        +stop()
+        +run_cleanup()
+        -_cleanup_database()
+        -_cleanup_containers()
+    }
+    
+    class CleanupScheduler {
+        -cleanup_service: CleanupService
+        +start()
+        +stop()
+        +force_cleanup()
+    }
+}
+
+package "Services" {
+    class JobService {
+        -db_manager: DatabaseManager
+        -datalake_manager: DatalakeManager
+        +create_jobs(job_data: JobPopulate)
+        +get_jobs(status: str, limit: int, offset: int)
+        +claim_job(claim_data: JobClaim)
+        +start_job(job_id: str, start_data: JobStart)
+        +complete_job(job_id: str, complete_data: JobComplete)
+        +fail_job(job_id: str, fail_data: JobFail)
+    }
+    
+    class BotService {
+        -db_manager: DatabaseManager
+        +register_bot(bot_data: BotRegister)
+        +update_heartbeat(heartbeat_data: BotHeartbeat)
+        +get_bots(include_deleted: bool)
+        +delete_bot(bot_id: str)
+        +get_bot_stats(bot_id: str, hours: int)
+    }
+    
+    class MonitoringService {
+        -db_manager: DatabaseManager
+        +get_system_metrics()
+        +get_bot_health_status()
+        +detect_stuck_jobs()
+    }
+    
+    class MetricsService {
+        -db_manager: DatabaseManager
+        +get_simple_metrics()
+        +get_metrics_summary()
+    }
+}
+
+package "Operations" {
+    abstract class Operation {
+        <<interface>>
+        +name: str
+        +description: str
+        +min_inputs: int
+        +max_inputs: int
+        +execute(a: int, b: int): int
+        +validate_inputs(a: int, b: int)
+        +get_metadata(): Dict
+    }
+    
+    class SumOperation {
+        +name: str
+        +description: str
+        +execute(a: int, b: int): int
+    }
+    
+    class SubtractOperation {
+        +name: str
+        +description: str
+        +execute(a: int, b: int): int
+    }
+    
+    class MultiplyOperation {
+        +name: str
+        +description: str
+        +execute(a: int, b: int): int
+    }
+    
+    class DivideOperation {
+        +name: str
+        +description: str
+        +execute(a: int, b: int): int
+    }
+}
+
+package "Models" {
+    class JobCreate {
+        +a: int
+        +b: int
+    }
+    
+    class JobClaim {
+        +bot_id: str
+    }
+    
+    class JobStart {
+        +bot_id: str
+    }
+    
+    class JobComplete {
+        +bot_id: str
+        +result: int
+        +duration_ms: int
+    }
+    
+    class JobFail {
+        +bot_id: str
+        +error: str
+    }
+    
+    class BotRegister {
+        +bot_id: str
+    }
+    
+    class BotHeartbeat {
+        +bot_id: str
+    }
+    
+    class JobPopulate {
+        +batchSize: int
+        +operation: str
+    }
+}
+
+package "Database Schema" {
+    entity "jobs" {
+        * id: TEXT
+        --
+        a: INTEGER
+        b: INTEGER
+        operation: TEXT
+        status: TEXT
+        claimed_by: TEXT
+        created_at: TIMESTAMP
+        claimed_at: TIMESTAMP
+        started_at: TIMESTAMP
+        finished_at: TIMESTAMP
+        attempts: INTEGER
+        error: TEXT
+        version: INTEGER
+    }
+    
+    entity "bots" {
+        * id: TEXT
+        --
+        status: TEXT
+        current_job_id: TEXT
+        assigned_operation: TEXT
+        last_heartbeat_at: TIMESTAMP
+        created_at: TIMESTAMP
+        deleted_at: TIMESTAMP
+        health_status: TEXT
+        stuck_job_id: TEXT
+        health_checked_at: TIMESTAMP
+    }
+    
+    entity "results" {
+        * id: TEXT
+        --
+        job_id: TEXT
+        a: INTEGER
+        b: INTEGER
+        operation: TEXT
+        result: INTEGER
+        processed_by: TEXT
+        processed_at: TIMESTAMP
+        duration_ms: INTEGER
+        status: TEXT
+        error: TEXT
+    }
+}
+
+' Relationships
+FastAPI --> DatabaseManager
+FastAPI --> DatalakeManager
+FastAPI --> CleanupService
+FastAPI --> CleanupScheduler
+
+CleanupScheduler --> CleanupService
+CleanupService --> DatabaseManager
+
+JobService --> DatabaseManager
+JobService --> DatalakeManager
+BotService --> DatabaseManager
+MonitoringService --> DatabaseManager
+MetricsService --> DatabaseManager
+
+SumOperation ..|> Operation
+SubtractOperation ..|> Operation
+MultiplyOperation ..|> Operation
+DivideOperation ..|> Operation
+
+JobService --> JobCreate
+JobService --> JobClaim
+JobService --> JobStart
+JobService --> JobComplete
+JobService --> JobFail
+JobService --> JobPopulate
+
+BotService --> BotRegister
+BotService --> BotHeartbeat
+
+DatabaseManager --> "jobs"
+DatabaseManager --> "bots"
+DatabaseManager --> "results"
+
+"jobs" ||--o{ "results" : "has"
+"bots" ||--o{ "jobs" : "claims"
+"bots" ||--o{ "results" : "processes"
+
+@enduml

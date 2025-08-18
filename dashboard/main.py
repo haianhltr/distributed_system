@@ -956,7 +956,13 @@ async def reset_bot_via_dashboard(bot_id: str):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers) as response:
                 if response.status == 200:
-                    return await response.json()
+                    result = await response.json()
+                    # Add additional context for dashboard
+                    if result.get('released_job_id'):
+                        result['message'] = f"Bot {bot_id} reset successfully. Job {result['released_job_id']} has been released back to pending."
+                    else:
+                        result['message'] = f"Bot {bot_id} reset successfully. No active jobs were found."
+                    return result
                 else:
                     error_text = await response.text()
                     raise HTTPException(status_code=response.status, detail=f"Reset failed: {error_text}")
@@ -1045,104 +1051,58 @@ async def clear_all_data():
         
         logger.info("Starting complete system clear operation")
         
-        # Step 1: Reset all bots to stop processing
+        # Clear all jobs
         try:
-            url = f"{config.MAIN_SERVER_URL}/bots/reset"
+            url = f"{config.MAIN_SERVER_URL}/admin/clear-all-data"
             headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers) as response:
                     if response.status == 200:
-                        bot_result = await response.json()
-                        reset_bots = bot_result.get("reset_bots", 0)
-                        logger.info(f"Reset {reset_bots} bots")
+                        result = await response.json()
+                        deleted_jobs = result.get('deleted_jobs', 0)
+                        reset_bots = result.get('reset_bots', 0)
+                        cleared_files = result.get('cleared_files', 0)
                     else:
                         error_text = await response.text()
-                        errors.append(f"Bot reset failed: {error_text}")
+                        errors.append(f"Clear all data failed: {error_text}")
+                        
         except Exception as e:
-            errors.append(f"Bot reset failed: {str(e)}")
-            logger.error(f"Bot reset failed: {e}")
+            errors.append(f"Clear all data error: {str(e)}")
         
-        # Step 2: Delete all jobs from database
-        try:
-            # Use docker exec to connect to postgres and delete jobs
-            process = await asyncio.create_subprocess_exec(
-                "docker", "exec", "distributed-system-test-postgres-1", 
-                "psql", "-U", "ds_user", "-d", "distributed_system", 
-                "-c", "DELETE FROM jobs;",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                # Parse the DELETE result to get count
-                output = stdout.decode().strip()
-                if "DELETE" in output:
-                    try:
-                        deleted_jobs = int(output.split("DELETE ")[1])
-                    except:
-                        deleted_jobs = 0  # If parsing fails, assume 0
-                logger.info(f"Deleted {deleted_jobs} jobs from database")
-            else:
-                error_msg = stderr.decode() if stderr else "Database deletion failed"
-                errors.append(f"Job deletion failed: {error_msg}")
-                logger.error(f"Job deletion failed: {error_msg}")
-        except Exception as e:
-            errors.append(f"Job deletion failed: {str(e)}")
-            logger.error(f"Job deletion failed: {e}")
-        
-        # Step 3: Clear datalake result files
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "docker", "exec", "distributed-system-test-main-server-1", 
-                "sh", "-c", "ls /app/datalake/data/*.ndjson 2>/dev/null | wc -l",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                try:
-                    cleared_files = int(stdout.decode().strip())
-                except:
-                    cleared_files = 0
-            
-            # Actually delete the files
-            process = await asyncio.create_subprocess_exec(
-                "docker", "exec", "distributed-system-test-main-server-1", 
-                "sh", "-c", "rm -f /app/datalake/data/*.ndjson",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            await process.communicate()
-            logger.info(f"Cleared {cleared_files} result files from datalake")
-        except Exception as e:
-            errors.append(f"Datalake cleanup failed: {str(e)}")
-            logger.error(f"Datalake cleanup failed: {e}")
-        
-        # Return results
-        result = {
-            "status": "success" if not errors else "partial",
+        return {
+            "status": "completed",
             "deleted_jobs": deleted_jobs,
             "reset_bots": reset_bots,
             "cleared_files": cleared_files,
-            "timestamp": datetime.utcnow().isoformat()
+            "errors": errors
         }
-        
-        if errors:
-            result["errors"] = errors
-            result["status"] = "partial" if (deleted_jobs > 0 or reset_bots > 0) else "failed"
-        
-        logger.info(f"System clear operation completed: {result}")
-        return result
         
     except Exception as e:
         logger.error(f"Clear all data operation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Clear operation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Clear all data failed: {str(e)}")
+
+@app.post("/api/admin/cleanup-inconsistent-states")
+async def cleanup_inconsistent_states_via_dashboard():
+    """Clean up inconsistent bot-job states via dashboard"""
+    try:
+        # Call main server cleanup endpoint
+        url = f"{config.MAIN_SERVER_URL}/admin/cleanup-inconsistent-states"
+        headers = {"Authorization": f"Bearer {config.ADMIN_TOKEN}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=f"Cleanup failed: {error_text}")
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cleanup inconsistent states operation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -44,13 +44,36 @@ class HttpClient:
                     )
                 )
                 logger.info(f"HTTP session initialized on attempt {attempt + 1}")
+                logger.debug(f"Session details: connector={type(self.session.connector).__name__}, "
+                           f"timeout={self.session.timeout}, closed={self.session.closed}")
                 return
             except Exception as e:
-                logger.warning(f"Failed to initialize session (attempt {attempt + 1}): {e}")
+                logger.warning(f"Failed to initialize session (attempt {attempt + 1}): {type(e).__name__}: {e}")
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                 else:
                     raise
+    
+    async def check_connection_health(self) -> Dict[str, Any]:
+        """Check and log detailed connection health information."""
+        health_info = {
+            "session_exists": self.session is not None,
+            "session_closed": self.session.closed if self.session else True,
+            "connector_type": type(self.session.connector).__name__ if self.session and self.session.connector else "None",
+            "timeout": str(self.session.timeout) if self.session else "None"
+        }
+        
+        if self.session and self.session.connector:
+            connector = self.session.connector
+            health_info.update({
+                "total_connections": connector.limit,
+                "per_host_connections": connector.limit_per_host,
+                "keepalive_timeout": connector.keepalive_timeout,
+                "enable_cleanup_closed": connector.enable_cleanup_closed
+            })
+        
+        logger.info(f"Connection health check: {health_info}")
+        return health_info
     
     async def close(self):
         """Close HTTP session."""
@@ -114,6 +137,10 @@ class HttpClient:
             return False, None
         
         try:
+            # Log request details before making the call
+            logger.debug(f"Attempting to claim job for bot {self.config.bot_id}")
+            logger.debug(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            
             async with self.session.post(
                 f"{self.config.main_server_url}/jobs/claim",
                 json={"bot_id": self.config.bot_id}
@@ -138,14 +165,42 @@ class HttpClient:
                 self.job_breaker.record_failure()
                 raise Exception(error_data.get("detail", "Failed to claim job"))
                 
+        except aiohttp.ClientError as e:
+            # Specific aiohttp client errors
+            logger.error(f"HTTP client error claiming job: {type(e).__name__}: {e}")
+            logger.error(f"Session details: closed={self.session.closed if self.session else 'No session'}, "
+                        f"connector={type(self.session.connector).__name__ if self.session and self.session.connector else 'No connector'}")
+            self.job_breaker.record_failure()
+            return False, None
+        except aiohttp.ServerTimeoutError as e:
+            # Timeout specific error
+            logger.error(f"Timeout error claiming job: {e}")
+            self.job_breaker.record_failure()
+            return False, None
+        except aiohttp.ClientOSError as e:
+            # OS-level connection errors (broken pipe, connection refused, etc.)
+            logger.error(f"OS connection error claiming job: {type(e).__name__}: {e}")
+            logger.error(f"Error code: {e.errno}, Error message: {e.strerror}")
+            self.job_breaker.record_failure()
+            return False, None
         except Exception as e:
-            logger.error(f"Failed to claim job: {e}")
+            # Generic exception with full context
+            logger.error(f"Failed to claim job: {type(e).__name__}: {e}")
+            logger.error(f"Full error context: {str(e)}")
+            logger.error(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
             self.job_breaker.record_failure()
             return False, None
     
     async def start_job(self, job_id: str) -> bool:
         """Mark job as started."""
         try:
+            # Log request details before making the call
+            logger.debug(f"Attempting to start job {job_id}")
+            logger.debug(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            
             async with self.session.post(
                 f"{self.config.main_server_url}/jobs/{job_id}/start",
                 json={"bot_id": self.config.bot_id}
@@ -156,13 +211,38 @@ class HttpClient:
                 else:
                     error_data = await response.json()
                     raise Exception(error_data.get("detail", "Failed to start job"))
+        except aiohttp.ClientError as e:
+            # Specific aiohttp client errors
+            logger.error(f"HTTP client error starting job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Session details: closed={self.session.closed if self.session else 'No session'}, "
+                        f"connector={type(self.session.connector).__name__ if self.session and self.session.connector else 'No connector'}")
+            return False
+        except aiohttp.ServerTimeoutError as e:
+            # Timeout specific error
+            logger.error(f"Timeout error starting job {job_id}: {e}")
+            return False
+        except aiohttp.ClientOSError as e:
+            # OS-level connection errors (broken pipe, connection refused, etc.)
+            logger.error(f"OS connection error starting job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Error code: {e.errno}, Error message: {e.strerror}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to start job {job_id}: {e}")
+            # Generic exception with full context
+            logger.error(f"Failed to start job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Full error context: {str(e)}")
+            logger.error(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
             return False
     
     async def complete_job(self, job_id: str, result: int, duration_ms: int) -> bool:
         """Mark job as completed successfully."""
         try:
+            # Log request details before making the call
+            logger.debug(f"Attempting to complete job {job_id} with result {result} ({duration_ms}ms)")
+            logger.debug(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            
             async with self.session.post(
                 f"{self.config.main_server_url}/jobs/{job_id}/complete",
                 json={
@@ -177,8 +257,29 @@ class HttpClient:
                 else:
                     error_data = await response.json()
                     raise Exception(error_data.get("detail", "Failed to complete job"))
+        except aiohttp.ClientError as e:
+            # Specific aiohttp client errors
+            logger.error(f"HTTP client error completing job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Session details: closed={self.session.closed if self.session else 'No session'}, "
+                        f"connector={type(self.session.connector).__name__ if self.session and self.session.connector else 'No connector'}")
+            return False
+        except aiohttp.ServerTimeoutError as e:
+            # Timeout specific error
+            logger.error(f"Timeout error completing job {job_id}: {e}")
+            return False
+        except aiohttp.ClientOSError as e:
+            # OS-level connection errors (broken pipe, connection refused, etc.)
+            logger.error(f"OS connection error completing job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Error code: {e.errno}, Error message: {e.strerror}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to complete job {job_id}: {e}")
+            # Generic exception with full context
+            logger.error(f"Failed to complete job {job_id}: {type(e).__name__}: {e}")
+            logger.error(f"Full error context: {str(e)}")
+            logger.error(f"Session state: closed={self.session.closed if self.session else 'No session'}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
             return False
     
     async def fail_job(self, job_id: str, error_message: str) -> bool:
