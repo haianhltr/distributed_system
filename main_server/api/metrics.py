@@ -1,9 +1,9 @@
 """Metrics and monitoring API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from services import MetricsService
-from core.exceptions import ValidationError
+from core.exceptions import ValidationError, service_error_handler
 from .dependencies import get_metrics_service
 
 
@@ -15,7 +15,10 @@ async def get_simple_metrics(
     metrics_service: MetricsService = Depends(get_metrics_service)
 ):
     """Simple JSON metrics endpoint."""
-    return await metrics_service.get_simple_metrics()
+    try:
+        return await metrics_service.get_simple_metrics()
+    except ValidationError as e:
+        raise service_error_handler(e)
 
 
 @router.get("/metrics/summary")
@@ -26,7 +29,7 @@ async def get_metrics_summary(
     try:
         return await metrics_service.get_metrics_summary()
     except ValidationError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise service_error_handler(e)
 
 
 @router.get("/datalake/stats")
@@ -38,7 +41,7 @@ async def get_datalake_stats(
     try:
         return await metrics_service.get_datalake_stats(days)
     except ValidationError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise service_error_handler(e)
 
 
 @router.get("/datalake/export/{date}")
@@ -50,4 +53,4 @@ async def export_datalake_date(
     try:
         return await metrics_service.export_datalake_date(date)
     except ValidationError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise service_error_handler(e)

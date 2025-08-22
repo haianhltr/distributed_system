@@ -1,16 +1,16 @@
 """Job processing business logic."""
 
-import uuid
 import random
-import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import structlog
 
 from database import DatabaseManager
 from datalake import DatalakeManager
-from models.schemas import JobCreate, JobClaim, JobStart, JobComplete, JobFail, JobPopulate
-from core.exceptions import NotFoundError, ConflictError, ValidationError
+from repositories import UnitOfWork, create_unit_of_work
+from domain import Job, Result, Operation, JobStatus
+from models.schemas import JobPopulate, JobClaim, JobStart, JobComplete, JobFail
+from core.exceptions import NotFoundError, ConflictError, ValidationError, BusinessRuleViolation
 
 
 logger = structlog.get_logger(__name__)
@@ -26,60 +26,51 @@ class JobService:
     async def create_jobs(self, job_data: JobPopulate) -> Dict[str, Any]:
         """Create a batch of new jobs."""
         batch_size = job_data.batchSize
-        operation = job_data.operation  # Get operation from request
-        jobs = []
+        operation = job_data.operation or random.choice(['sum', 'subtract', 'multiply', 'divide'])
+        
+        # Validate operation
+        try:
+            operation_enum = Operation(operation)
+        except ValueError:
+            raise ValidationError(f"Invalid operation: {operation}")
+        
+        jobs_created = []
         
         try:
-            async with self.db.get_connection() as conn:
-                async with conn.transaction():
-                    for _ in range(batch_size):
-                        job_id = str(uuid.uuid4())
-                        a = random.randint(0, 999)
-                        
-                        # Handle division by zero prevention
-                        if operation == 'divide':
-                            b = random.randint(1, 999)  # Avoid b = 0
-                        else:
-                            b = random.randint(0, 999)
-                        
-                        # FIXED: Include operation field in INSERT
-                        await conn.execute("""
-                            INSERT INTO jobs (id, a, b, operation, status, created_at) 
-                            VALUES ($1, $2, $3, $4, 'pending', CURRENT_TIMESTAMP)
-                        """, job_id, a, b, operation)
-                        
-                        # FIXED: Include operation in response
-                        jobs.append({"id": job_id, "a": a, "b": b, "operation": operation})
+            async with create_unit_of_work(self.db.pool) as uow:
+                for _ in range(batch_size):
+                    a = random.randint(0, 999)
+                    # Prevent division by zero
+                    b = random.randint(1, 999) if operation == 'divide' else random.randint(0, 999)
+                    
+                    job_dict = await uow.jobs.create(a, b, operation)
+                    jobs_created.append(job_dict)
             
             logger.info("Created new jobs", count=batch_size, operation=operation)
-            return {"created": batch_size, "jobs": jobs, "operation": operation}
+            return {
+                "created": batch_size,
+                "jobs": jobs_created,
+                "operation": operation
+            }
             
         except Exception as e:
             logger.error("Failed to populate jobs", error=str(e))
             raise ValidationError(f"Failed to create jobs: {str(e)}")
     
-    async def get_jobs(self, status: Optional[str] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    async def get_jobs(
+        self, 
+        status: Optional[str] = None, 
+        limit: int = 100, 
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
         """Get jobs with optional filtering."""
         try:
-            async with self.db.get_connection() as conn:
+            async with create_unit_of_work(self.db.pool) as uow:
                 if status:
-                    jobs = await conn.fetch("""
-                        SELECT j.*, r.result, r.duration_ms,
-                               CASE 
-                                   WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
-                                   THEN EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 
-                                   ELSE NULL 
-                               END as processing_duration_minutes
-                        FROM jobs j 
-                        LEFT JOIN results r ON j.id = r.job_id
-                        WHERE j.status = $1 
-                        ORDER BY j.created_at DESC 
-                        LIMIT $2 OFFSET $3
-                    """, status, limit, offset)
+                    jobs = await uow.jobs.find_by_status(status, limit, offset)
                 else:
-                    # Priority sorting: pending/claimed/processing first, then completed/failed
-                    # Within each priority group, sort by created_at DESC
-                    jobs = await conn.fetch("""
+                    # Custom query for all jobs with priority sorting
+                    query = """
                         SELECT j.*, r.result, r.duration_ms,
                                CASE 
                                    WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
@@ -99,20 +90,17 @@ class JobService:
                             END,
                             j.created_at DESC
                         LIMIT $1 OFFSET $2
-                    """, limit, offset)
+                    """
+                    jobs = await uow.jobs.execute_query(query, limit, offset)
                 
-                # Convert to dict and ensure all fields are included
-                job_list = []
-                for row in jobs:
-                    job_dict = dict(row)
-                    # Explicitly handle result and duration_ms fields
-                    if 'result' not in job_dict:
-                        job_dict['result'] = None
-                    if 'duration_ms' not in job_dict:
-                        job_dict['duration_ms'] = None
-                    job_list.append(job_dict)
+                # Ensure all fields are present
+                for job in jobs:
+                    if 'result' not in job:
+                        job['result'] = None
+                    if 'duration_ms' not in job:
+                        job['duration_ms'] = None
                 
-                return job_list
+                return jobs
             
         except Exception as e:
             logger.error("Failed to get jobs", error=str(e))
@@ -121,31 +109,27 @@ class JobService:
     async def get_job_by_id(self, job_id: str) -> Dict[str, Any]:
         """Get specific job by ID."""
         try:
-            async with self.db.get_connection() as conn:
-                job = await conn.fetchrow("""
-                    SELECT j.*, r.result, r.duration_ms,
-                           CASE 
-                               WHEN j.status = 'processing' AND j.started_at IS NOT NULL 
-                               THEN EXTRACT(EPOCH FROM (NOW() - j.started_at)) / 60 
-                               ELSE NULL 
-                           END as processing_duration_minutes
-                    FROM jobs j 
-                    LEFT JOIN results r ON j.id = r.job_id
-                    WHERE j.id = $1
-                """, job_id)
+            async with create_unit_of_work(self.db.pool) as uow:
+                job = await uow.jobs.find_by_id(job_id)
                 
                 if not job:
-                    raise NotFoundError(f"Job {job_id} not found")
+                    raise NotFoundError("Job", job_id)
                 
-                # Convert to dict and ensure all fields are included
-                job_dict = dict(job)
-                # Explicitly handle result and duration_ms fields
-                if 'result' not in job_dict:
-                    job_dict['result'] = None
-                if 'duration_ms' not in job_dict:
-                    job_dict['duration_ms'] = None
-                    
-                return job_dict
+                # Get result if exists
+                query = """
+                    SELECT result, duration_ms FROM results 
+                    WHERE job_id = $1
+                """
+                results = await uow.results.execute_query(query, job_id)
+                
+                if results:
+                    job['result'] = results[0]['result']
+                    job['duration_ms'] = results[0]['duration_ms']
+                else:
+                    job['result'] = None
+                    job['duration_ms'] = None
+                
+                return job
                 
         except NotFoundError:
             raise
@@ -158,62 +142,38 @@ class JobService:
         bot_id = claim_data.bot_id
         
         try:
-            async with self.db.get_connection() as conn:
-                async with conn.transaction():
-                    # Check if bot already has a job
-                    existing_job = await conn.fetchval("""
-                        SELECT current_job_id FROM bots 
-                        WHERE id = $1 AND current_job_id IS NOT NULL
-                    """, bot_id)
-                    
-                    if existing_job:
-                        raise ConflictError("Bot already has an active job")
-                    
-                    # Get bot's assigned operation
-                    bot_operation = await conn.fetchval("""
-                        SELECT assigned_operation FROM bots WHERE id = $1
-                    """, bot_id)
-                    
-                    # Find first available job matching bot's operation (or any if unassigned)
-                    if bot_operation:
-                        # Bot has assigned operation - only claim jobs of that type
-                        available_job = await conn.fetchrow("""
-                            SELECT * FROM jobs 
-                            WHERE status = 'pending' AND operation = $1
-                            ORDER BY created_at ASC 
-                            LIMIT 1
-                        """, bot_operation)
-                    else:
-                        # Bot has no assigned operation - can claim any job
-                        available_job = await conn.fetchrow("""
-                            SELECT * FROM jobs 
-                            WHERE status = 'pending' 
-                            ORDER BY created_at ASC 
-                            LIMIT 1
-                        """)
-                    
-                    if not available_job:
-                        raise NotFoundError("No jobs available")
-                    
-                    job_dict = dict(available_job)
-                    
-                    # Claim the job
-                    await conn.execute("""
-                        UPDATE jobs 
-                        SET status = 'claimed', claimed_by = $1, claimed_at = NOW()
-                        WHERE id = $2 AND status = 'pending'
-                    """, bot_id, job_dict['id'])
-                    
-                    # Update bot's current job
-                    await conn.execute("""
-                        UPDATE bots 
-                        SET current_job_id = $1, status = 'busy'
-                        WHERE id = $2
-                    """, job_dict['id'], bot_id)
-                    
-                    return job_dict
+            async with create_unit_of_work(self.db.pool) as uow:
+                # Check bot state
+                bot = await uow.bots.find_by_id(bot_id)
+                if not bot:
+                    raise NotFoundError("Bot", bot_id)
                 
-        except (ConflictError, NotFoundError):
+                if bot.get('current_job_id'):
+                    raise ConflictError("Bot already has an active job")
+                
+                if not bot.get('assigned_operation'):
+                    raise BusinessRuleViolation("Bot has no assigned operation")
+                
+                # Find available job
+                job = await uow.jobs.find_pending_for_operation(
+                    bot['assigned_operation'], 
+                    limit=1
+                )
+                
+                if not job:
+                    raise NotFoundError("No jobs available", "")
+                
+                # Claim the job
+                success = await uow.jobs.claim(job['id'], bot_id)
+                if not success:
+                    raise ConflictError("Failed to claim job - already claimed")
+                
+                # Update bot state
+                await uow.bots.set_current_job(bot_id, job['id'], 'busy')
+                
+                return job
+                
+        except (ConflictError, NotFoundError, BusinessRuleViolation):
             raise
         except Exception as e:
             logger.error("Failed to claim job", bot_id=bot_id, error=str(e))
@@ -224,14 +184,10 @@ class JobService:
         bot_id = start_data.bot_id
         
         try:
-            async with self.db.get_connection() as conn:
-                result = await conn.execute("""
-                    UPDATE jobs 
-                    SET status = 'processing', started_at = NOW()
-                    WHERE id = $1 AND claimed_by = $2 AND status = 'claimed'
-                """, job_id, bot_id)
+            async with create_unit_of_work(self.db.pool) as uow:
+                success = await uow.jobs.start(job_id, bot_id)
                 
-                if result == 'UPDATE 0':
+                if not success:
                     raise ConflictError("Invalid job state or bot mismatch")
                 
                 return {"status": "started"}
@@ -249,75 +205,52 @@ class JobService:
         duration_ms = complete_data.duration_ms
         
         try:
-            async with self.db.get_connection() as conn:
-                async with conn.transaction():
-                    # Get job details
-                    job = await conn.fetchrow("""
-                        SELECT * FROM jobs 
-                        WHERE id = $1 AND claimed_by = $2 AND status = 'processing'
-                    """, job_id, bot_id)
-                    
-                    if not job:
-                        raise ConflictError("Invalid job state or bot mismatch")
-                    
-                    job_dict = dict(job)
-                    
-                    # Mark job as succeeded
-                    await conn.execute("""
-                        UPDATE jobs 
-                        SET status = 'succeeded', finished_at = NOW()
-                        WHERE id = $1
-                    """, job_id)
-                    
-                    # Create result record
-                    result_id = str(uuid.uuid4())
-                    # Only populate sum column for sum operations
-                    sum_value = result if job_dict['operation'] == 'sum' else None
-                    
-                    # Prepare JSONB data for new generic schema
-                    input_data = {
-                        "a": job_dict['a'],
-                        "b": job_dict['b']
-                    }
-                    output_data = {
-                        "result": result
-                    }
-                    metadata = {
-                        "operation_type": job_dict['operation'],
-                        "execution_context": "distributed_bot",
-                        "legacy_mode": True
-                    }
-                    
-                    await conn.execute("""
-                        INSERT INTO results (id, job_id, a, b, sum, result, operation, processed_by, processed_at, duration_ms, status, input_data, output_data, metadata)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11, $12, $13)
-                    """, result_id, job_id, job_dict['a'], job_dict['b'], sum_value, result, job_dict['operation'], bot_id, duration_ms, 
-                    'succeeded', input_data, output_data, metadata)
-                    
-                    # Clear bot's current job
-                    await conn.execute("""
-                        UPDATE bots 
-                        SET current_job_id = NULL, status = 'idle'
-                        WHERE id = $1
-                    """, bot_id)
-                    
-                    # Write to datalake
-                    await self.datalake.append_result({
-                        "id": result_id,
-                        "job_id": job_id,
-                        "a": job_dict['a'],
-                        "b": job_dict['b'],
-                        "result": result,
-                        "operation": job_dict['operation'],
-                        "processed_by": bot_id,
-                        "processed_at": datetime.utcnow().isoformat(),
-                        "duration_ms": duration_ms,
-                        "status": "succeeded"
-                    })
-                    
-                    return {"status": "completed"}
+            async with create_unit_of_work(self.db.pool) as uow:
+                # Get job details
+                job = await uow.jobs.find_by_id(job_id)
+                if not job:
+                    raise NotFoundError("Job", job_id)
                 
-        except ConflictError:
+                if job['claimed_by'] != bot_id or job['status'] != 'processing':
+                    raise ConflictError("Invalid job state or bot mismatch")
+                
+                # Mark job as completed
+                success = await uow.jobs.complete(job_id, bot_id)
+                if not success:
+                    raise ConflictError("Failed to complete job")
+                
+                # Create result record
+                result_dict = await uow.results.create(
+                    job_id=job_id,
+                    a=job['a'],
+                    b=job['b'],
+                    operation=job['operation'],
+                    result=result,
+                    processed_by=bot_id,
+                    duration_ms=duration_ms,
+                    status="succeeded"
+                )
+                
+                # Clear bot's current job
+                await uow.bots.set_current_job(bot_id, None, 'idle')
+                
+                # Write to datalake
+                await self.datalake.append_result({
+                    "id": result_dict['id'],
+                    "job_id": job_id,
+                    "a": job['a'],
+                    "b": job['b'],
+                    "operation": job['operation'],
+                    "result": result,
+                    "processed_by": bot_id,
+                    "processed_at": datetime.utcnow().isoformat(),
+                    "duration_ms": duration_ms,
+                    "status": "succeeded"
+                })
+                
+                return {"status": "completed"}
+                
+        except (ConflictError, NotFoundError):
             raise
         except Exception as e:
             logger.error("Failed to complete job", job_id=job_id, error=str(e))
@@ -329,77 +262,112 @@ class JobService:
         error = fail_data.error
         
         try:
-            async with self.db.get_connection() as conn:
-                async with conn.transaction():
-                    # Get job details
-                    job = await conn.fetchrow("""
-                        SELECT * FROM jobs 
-                        WHERE id = $1 AND claimed_by = $2 AND status = 'processing'
-                    """, job_id, bot_id)
-                    
-                    if not job:
-                        raise ConflictError("Invalid job state or bot mismatch")
-                    
-                    job_dict = dict(job)
-                    
-                    # Mark job as failed
-                    await conn.execute("""
-                        UPDATE jobs 
-                        SET status = 'failed', finished_at = NOW(), attempts = attempts + 1, error = $1
-                        WHERE id = $2
-                    """, error, job_id)
-                    
-                    # Create result record  
-                    result_id = str(uuid.uuid4())
-                    
-                    # Prepare JSONB data for new generic schema
-                    input_data = {
-                        "a": job_dict['a'],
-                        "b": job_dict['b']
-                    }
-                    output_data = {
-                        "error": error,
-                        "result": None
-                    }
-                    metadata = {
-                        "operation_type": job_dict['operation'],
-                        "execution_context": "distributed_bot",
-                        "legacy_mode": True,
-                        "failure_reason": error
-                    }
-                    
-                    await conn.execute("""
-                        INSERT INTO results (id, job_id, a, b, sum, result, operation, processed_by, processed_at, duration_ms, status, error, input_data, output_data, metadata)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11, $12, $13, $14)
-                    """, result_id, job_id, job_dict['a'], job_dict['b'], None, 0, job_dict['operation'], bot_id, 0, 
-                    'failed', error, input_data, output_data, metadata)
-                    
-                    # Clear bot's current job
-                    await conn.execute("""
-                        UPDATE bots 
-                        SET current_job_id = NULL, status = 'idle'
-                        WHERE id = $1
-                    """, bot_id)
-                    
-                    # Write to datalake
-                    await self.datalake.append_result({
-                        "id": result_id,
-                        "job_id": job_id,
-                        "a": job_dict['a'],
-                        "b": job_dict['b'],
-                        "result": 0,
-                        "operation": job_dict['operation'],
-                        "processed_by": bot_id,
-                        "processed_at": datetime.utcnow().isoformat(),
-                        "duration_ms": 0,
-                        "status": "failed",
-                        "error": error
-                    })
-                    
-                    return {"status": "failed"}
+            async with create_unit_of_work(self.db.pool) as uow:
+                # Get job details
+                job = await uow.jobs.find_by_id(job_id)
+                if not job:
+                    raise NotFoundError("Job", job_id)
                 
-        except ConflictError:
+                if job['claimed_by'] != bot_id or job['status'] != 'processing':
+                    raise ConflictError("Invalid job state or bot mismatch")
+                
+                # Mark job as failed
+                success = await uow.jobs.fail(job_id, bot_id, error)
+                if not success:
+                    raise ConflictError("Failed to fail job")
+                
+                # Create result record
+                result_dict = await uow.results.create(
+                    job_id=job_id,
+                    a=job['a'],
+                    b=job['b'],
+                    operation=job['operation'],
+                    result=0,
+                    processed_by=bot_id,
+                    duration_ms=0,
+                    status="failed",
+                    error=error
+                )
+                
+                # Clear bot's current job
+                await uow.bots.set_current_job(bot_id, None, 'idle')
+                
+                # Write to datalake
+                await self.datalake.append_result({
+                    "id": result_dict['id'],
+                    "job_id": job_id,
+                    "a": job['a'],
+                    "b": job['b'],
+                    "operation": job['operation'],
+                    "result": 0,
+                    "processed_by": bot_id,
+                    "processed_at": datetime.utcnow().isoformat(),
+                    "duration_ms": 0,
+                    "status": "failed",
+                    "error": error
+                })
+                
+                return {"status": "failed"}
+                
+        except (ConflictError, NotFoundError):
             raise
         except Exception as e:
             logger.error("Failed to fail job", job_id=job_id, error=str(e))
             raise ValidationError(f"Failed to fail job: {str(e)}")
+    
+    async def release_job(self, job_id: str) -> Dict[str, Any]:
+        """Release a stuck job back to pending state."""
+        try:
+            async with create_unit_of_work(self.db.pool) as uow:
+                job = await uow.jobs.find_by_id(job_id)
+                if not job:
+                    raise NotFoundError("Job", job_id)
+                
+                if job['status'] not in ['claimed', 'processing']:
+                    raise BusinessRuleViolation(
+                        f"Job {job_id} is in {job['status']} state and cannot be released"
+                    )
+                
+                # Release job
+                success = await uow.jobs.release_to_pending(job_id)
+                if not success:
+                    raise ConflictError("Failed to release job")
+                
+                # Reset bot if assigned
+                if job['claimed_by']:
+                    bot = await uow.bots.find_by_id(job['claimed_by'])
+                    if bot and bot.get('current_job_id') == job_id:
+                        await uow.bots.set_current_job(job['claimed_by'], None, 'idle')
+                
+                logger.info(f"Released job {job_id} back to pending")
+                
+                return {
+                    "status": "released",
+                    "job_id": job_id,
+                    "bot_id": job.get('claimed_by'),
+                    "message": f"Job {job_id} has been released back to pending state"
+                }
+                
+        except (NotFoundError, BusinessRuleViolation, ConflictError):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to release job {job_id}: {e}")
+            raise ValidationError(f"Failed to release job: {str(e)}")
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Get job system metrics."""
+        try:
+            async with create_unit_of_work(self.db.pool) as uow:
+                job_metrics = await uow.jobs.get_metrics()
+                throughput = await uow.results.get_system_throughput(hours=1)
+                
+                return {
+                    "jobs": job_metrics,
+                    "throughput": {
+                        "completed_last_hour": throughput
+                    }
+                }
+                
+        except Exception as e:
+            logger.error("Failed to get job metrics", error=str(e))
+            raise ValidationError(f"Failed to get metrics: {str(e)}")

@@ -6,6 +6,7 @@ import structlog
 
 from database import DatabaseManager
 from datalake import DatalakeManager
+from repositories import create_unit_of_work
 from core.exceptions import ValidationError
 
 
@@ -22,54 +23,36 @@ class MetricsService:
     async def get_simple_metrics(self) -> Dict[str, Any]:
         """Simple JSON metrics endpoint."""
         try:
-            async with self.db.get_connection() as conn:
-                # Count jobs by status
-                job_counts = await conn.fetch("""
-                    SELECT status, COUNT(*) as count 
-                    FROM jobs 
-                    GROUP BY status
-                """)
+            async with create_unit_of_work(self.db.pool) as uow:
+                # Get job metrics
+                job_metrics = await uow.jobs.get_metrics()
                 
-                # Count bots by status
-                bot_counts = await conn.fetch("""
-                    SELECT 
-                        CASE 
-                            WHEN deleted_at IS NOT NULL THEN 'deleted'
-                            WHEN NOW() - INTERVAL '2 minutes' > last_heartbeat_at THEN 'down'
-                            ELSE status
-                        END as computed_status,
-                        COUNT(*) as count
-                    FROM bots 
-                    GROUP BY computed_status
-                """)
+                # Get bot metrics
+                bot_metrics = await uow.bots.get_metrics()
                 
-                # Total counts
-                total_jobs = await conn.fetchval("SELECT COUNT(*) FROM jobs")
-                total_bots = await conn.fetchval("SELECT COUNT(*) FROM bots WHERE deleted_at IS NULL")
+                # Get throughput
+                throughput = await uow.results.get_system_throughput(hours=1)
                 
-                # Recent activity
-                jobs_last_hour = await conn.fetchval("""
+                # Get job creation count
+                jobs_created_query = """
                     SELECT COUNT(*) FROM jobs 
                     WHERE created_at > NOW() - INTERVAL '1 hour'
-                """)
+                """
+                jobs_created_result = await uow.execute_query(jobs_created_query)
+                jobs_created = jobs_created_result[0]['count'] if jobs_created_result else 0
                 
-                # Build metrics response
-                metrics = {
+                return {
                     "timestamp": datetime.utcnow().isoformat(),
                     "jobs": {
-                        "total": total_jobs or 0,
-                        "by_status": {row["status"]: row["count"] for row in job_counts}
+                        "total": sum(job_metrics.values()),
+                        "by_status": job_metrics
                     },
-                    "bots": {
-                        "total": total_bots or 0,
-                        "by_status": {row["computed_status"]: row["count"] for row in bot_counts}
-                    },
+                    "bots": bot_metrics,
                     "activity": {
-                        "jobs_created_last_hour": jobs_last_hour or 0
+                        "jobs_created_last_hour": jobs_created,
+                        "jobs_completed_last_hour": throughput
                     }
                 }
-                
-                return metrics
                 
         except Exception as e:
             logger.error("Failed to get metrics", error=str(e))
@@ -84,43 +67,26 @@ class MetricsService:
     async def get_metrics_summary(self) -> Dict[str, Any]:
         """Get system metrics summary for dashboard."""
         try:
-            async with self.db.get_connection() as conn:
+            async with create_unit_of_work(self.db.pool) as uow:
                 # Job counts by status
-                job_rows = await conn.fetch("""
-                    SELECT status, COUNT(*) as count 
-                    FROM jobs 
-                    GROUP BY status
-                """)
-                
-                job_counts = {row['status']: row['count'] for row in job_rows}
+                job_metrics = await uow.jobs.get_metrics()
                 
                 # Bot counts
-                bot_row = await conn.fetchrow("""
-                    SELECT 
-                        COUNT(*) as total,
-                        SUM(CASE WHEN NOW() - INTERVAL '2 minutes' > last_heartbeat_at THEN 1 ELSE 0 END) as down,
-                        SUM(CASE WHEN status = 'busy' AND NOW() - INTERVAL '2 minutes' <= last_heartbeat_at THEN 1 ELSE 0 END) as busy,
-                        SUM(CASE WHEN status = 'idle' AND NOW() - INTERVAL '2 minutes' <= last_heartbeat_at THEN 1 ELSE 0 END) as idle
-                    FROM bots 
-                    WHERE deleted_at IS NULL
-                """)
+                bot_metrics = await uow.bots.get_metrics()
                 
-                bot_counts = dict(bot_row)
+                # Recent throughput
+                completed_last_hour = await uow.results.get_system_throughput(hours=1)
                 
-                # Recent throughput (last hour)
-                throughput_row = await conn.fetchrow("""
-                    SELECT COUNT(*) as completed_last_hour
-                    FROM jobs 
-                    WHERE status IN ('succeeded', 'failed') 
-                    AND finished_at > NOW() - INTERVAL '1 hour'
-                """)
-                
-                throughput = dict(throughput_row)
+                # Operation statistics
+                operation_stats = await uow.results.get_operation_stats()
                 
                 return {
-                    "jobs": job_counts,
-                    "bots": bot_counts,
-                    "throughput": throughput
+                    "jobs": job_metrics,
+                    "bots": bot_metrics,
+                    "throughput": {
+                        "completed_last_hour": completed_last_hour
+                    },
+                    "operations": operation_stats
                 }
                 
         except Exception as e:
