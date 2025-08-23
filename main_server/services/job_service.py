@@ -5,12 +5,12 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import structlog
 
-from database import DatabaseManager
-from datalake import DatalakeManager
-from repositories import UnitOfWork, create_unit_of_work
-from domain import Job, Result, Operation, JobStatus
-from models.schemas import JobPopulate, JobClaim, JobStart, JobComplete, JobFail
-from core.exceptions import NotFoundError, ConflictError, ValidationError, BusinessRuleViolation
+from main_server.database import DatabaseManager
+from main_server.datalake import DatalakeManager
+from main_server.repositories import UnitOfWork, create_unit_of_work
+from main_server.domain import Job, Result, Operation, JobStatus
+from main_server.models.schemas import JobPopulate, JobClaim, JobStart, JobComplete, JobFail
+from main_server.core.exceptions import NotFoundError, ConflictError, ValidationError, BusinessRuleViolation
 
 
 logger = structlog.get_logger(__name__)

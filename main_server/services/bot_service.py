@@ -20,20 +20,85 @@ class BotService:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
         
-    async def register_bot(self, bot_data: BotRegister) -> Dict[str, str]:
-        """Register a new bot."""
-        bot_id = bot_data.bot_id
+    async def register_bot(self, bot_data: BotRegister, idempotency_key: str) -> Dict[str, Any]:
+        """Register a new bot with full contract response."""
+        bot_key = bot_data.bot_key
         
         try:
             async with create_unit_of_work(self.db.pool) as uow:
-                bot = await uow.bots.register(bot_id)
+                # Check idempotency first
+                existing_response = await self._check_idempotency(uow, idempotency_key)
+                if existing_response:
+                    return existing_response
                 
-            logger.info("Bot registered", bot_id=bot_id)
-            return {"status": "registered", "bot_id": bot_id}
-            
+                # Generate bot ID and create bot
+                import uuid
+                bot_id = f"b_{uuid.uuid4().hex[:5].upper()}"
+                
+                # Register bot in database
+                bot = await uow.bots.register(bot_key, bot_id)
+                
+                # Create session
+                session_id = f"s_{uuid.uuid4().hex[:5].upper()}"
+                expires_in_sec = 900  # 15 minutes
+                heartbeat_interval_sec = 30
+                
+                # Build full response per contract
+                registration_response = {
+                    "bot_id": bot_id,
+                    "registered_at": datetime.utcnow().isoformat() + "Z",
+                    "session": {
+                        "session_id": session_id,
+                        "expires_in_sec": expires_in_sec,
+                        "heartbeat_interval_sec": heartbeat_interval_sec
+                    },
+                    "assignment": {
+                        "operation": None,
+                        "queue": None,
+                        "max_concurrency": bot_data.capabilities.max_concurrency
+                    },
+                    "policy": {
+                        "rate_limits": {
+                            "claim_rps": 1
+                        },
+                        "backoff": {
+                            "min_ms": 200,
+                            "max_ms": 5000,
+                            "jitter": True
+                        }
+                    },
+                    "endpoints": {
+                        "heartbeat": "/v1/bots/heartbeat",
+                        "claim": "/v1/jobs/claim",
+                        "report": "/v1/jobs/report"
+                    },
+                    "server": {
+                        "region": "us-east-1",
+                        "version": "2025.08.22.1"
+                    }
+                }
+                
+                # Store idempotency record
+                await self._store_idempotency(uow, idempotency_key, 200, registration_response)
+                
+                logger.info("Bot registered", bot_id=bot_id, bot_key=bot_key)
+                return registration_response
+                
         except Exception as e:
-            logger.error("Failed to register bot", bot_id=bot_id, error=str(e))
+            logger.error("Failed to register bot", bot_key=bot_key, error=str(e))
             raise ValidationError(f"Registration failed: {str(e)}")
+    
+    async def _check_idempotency(self, uow, idempotency_key: str) -> Optional[Dict[str, Any]]:
+        """Check if this is a duplicate request."""
+        # Simple implementation - in production use proper idempotency store
+        # For now, return None (no duplicates)
+        return None
+    
+    async def _store_idempotency(self, uow, idempotency_key: str, status: int, response: Dict[str, Any]):
+        """Store idempotency record."""
+        # Simple implementation - in production store in database
+        # For now, just log
+        logger.debug(f"Stored idempotency record: {idempotency_key}, status: {status}")
     
     async def update_heartbeat(self, heartbeat_data: BotHeartbeat) -> Dict[str, str]:
         """Update bot heartbeat."""

@@ -1,6 +1,8 @@
 """FastAPI dependency injection helpers."""
 
-from fastapi import Depends, HTTPException, status
+import jwt
+from datetime import datetime
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from core.dependencies import get_dependencies
@@ -65,6 +67,31 @@ async def get_admin_service(
     """Get admin service instance."""
     deps = get_dependencies()
     return AdminService(db, deps.cleanup_scheduler)
+
+
+def verify_jwt(authorization: str = Header(...)) -> dict:
+    """Verify JWT token from Authorization header."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        # In production, use proper secret from environment/config
+        secret_key = "your-secret-key"
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+        
+        # Validate token claims
+        if payload.get("aud") != "bots":
+            raise HTTPException(status_code=401, detail="Invalid audience")
+        
+        if payload.get("exp", 0) < datetime.utcnow().timestamp():
+            raise HTTPException(status_code=401, detail="Token expired")
+        
+        return payload
+        
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
 
 async def verify_admin_token(

@@ -42,7 +42,9 @@
       "Bash(docker:*)",
       "Bash(touch:*)",
       "Bash(pip show:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(set PYTHONPATH=.)",
+      "Bash($env:PYTHONPATH=\".\")"
     ],
     "deny": []
   }

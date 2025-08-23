@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from typing import Callable, Any, Optional
-from models.schemas import RetryConfig
+from ..models.schemas import RetryConfig
 
 logger = logging.getLogger(__name__)
 

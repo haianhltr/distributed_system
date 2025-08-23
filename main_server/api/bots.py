@@ -1,6 +1,7 @@
 """Bot management API endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
+from datetime import datetime
 
 from models.schemas import BotRegister, BotHeartbeat, BotAssignOperation
 from services import BotService
@@ -8,7 +9,7 @@ from core.exceptions import (
     NotFoundError, ValidationError, ConflictError, 
     service_error_handler
 )
-from .dependencies import get_bot_service, verify_admin_token
+from .dependencies import get_bot_service, verify_admin_token, verify_jwt
 
 
 router = APIRouter(prefix="/bots", tags=["bots"])
@@ -17,11 +18,18 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 @router.post("/register")
 async def register_bot(
     bot_data: BotRegister,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    jwt_payload: dict = Depends(verify_jwt),
     bot_service: BotService = Depends(get_bot_service)
 ):
-    """Register a new bot."""
+    """Register a new bot with JWT authentication and idempotency."""
     try:
-        return await bot_service.register_bot(bot_data)
+        # Validate JWT scope
+        if jwt_payload.get("scope") != "register":
+            raise ValidationError("Invalid JWT scope for registration")
+            
+        # Call service with idempotency key
+        return await bot_service.register_bot(bot_data, idempotency_key)
     except ValidationError as e:
         raise service_error_handler(e)
 

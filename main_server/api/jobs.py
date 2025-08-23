@@ -3,11 +3,11 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, status, Response
 
-from models.schemas import (
+from main_server.models.schemas import (
     JobClaim, JobStart, JobComplete, JobFail, JobPopulate, JobResponse
 )
-from services import JobService
-from core.exceptions import (
+from main_server.services import JobService
+from main_server.core.exceptions import (
     NotFoundError, ConflictError, ValidationError, BusinessRuleViolation,
     service_error_handler
 )

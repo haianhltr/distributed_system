@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import logging
 
-from operations.base import Operation
+from ..operations.base import Operation
 
 logger = logging.getLogger(__name__)
 

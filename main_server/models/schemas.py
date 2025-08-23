@@ -30,8 +30,21 @@ class JobFail(BaseModel):
     error: str = Field(..., min_length=1, description="Error message")
 
 
+class AgentInfo(BaseModel):
+    version: str = Field(..., description="Bot agent version")
+    platform: str = Field(..., description="Bot platform (e.g., linux/amd64)")
+
+
+class BotCapabilities(BaseModel):
+    operations: List[str] = Field(..., description="List of supported operations")
+    max_concurrency: int = Field(..., ge=1, description="Maximum concurrent jobs")
+
+
 class BotRegister(BaseModel):
-    bot_id: str = Field(..., min_length=1, description="Bot identifier")
+    bot_key: str = Field(..., min_length=1, description="Bot key identifier")
+    instance_id: str = Field(..., min_length=1, description="Unique instance identifier")
+    agent: AgentInfo = Field(..., description="Agent information")
+    capabilities: BotCapabilities = Field(..., description="Bot capabilities")
 
 
 class BotHeartbeat(BaseModel):

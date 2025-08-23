@@ -5,14 +5,13 @@ import time
 import random
 import logging
 from typing import Optional, Dict, Any
-from models.enums import BotState
-from models.schemas import JobData, BotMetrics
-from config.settings import BotConfig
-from services.http_client import HttpClient
-from services.health_service import HealthService
-from services.operation_service import OperationService
-from utils.retry import RetryHandler
-from models.schemas import RetryConfig
+from ..models.enums import BotState
+from ..models.schemas import JobData, BotMetrics, RetryConfig
+from ..config.settings import BotConfig
+from .http_client import HttpClient
+from .health_service import HealthService
+from .operation_service import OperationService
+from ..utils.retry import RetryHandler
 
 logger = logging.getLogger(__name__)
 

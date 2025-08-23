@@ -3,10 +3,11 @@
 import asyncio
 import aiohttp
 import logging
+import uuid
 from typing import Optional, Dict, Any, Tuple
-from config.settings import BotConfig
-from utils.circuit_breaker import CircuitBreaker
-from models.schemas import CircuitBreakerConfig
+from ..config.settings import BotConfig
+from ..utils.circuit_breaker import CircuitBreaker
+from ..models.schemas import CircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,15 @@ class HttpClient:
     def __init__(self, config: BotConfig):
         self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
+        
+        # Authentication
+        self.access_token: Optional[str] = None
+        self.session_id: Optional[str] = None
+        self.session_expires_in: Optional[int] = None
+        self.heartbeat_interval: Optional[int] = None
+        
+        # Generate unique instance ID per process
+        self.instance_id = f"i-{uuid.uuid4().hex}"
         
         # Circuit breakers for different operations
         cb_config = CircuitBreakerConfig(
@@ -81,19 +91,85 @@ class HttpClient:
             await self.session.close()
             logger.info("HTTP session closed")
     
+    async def _get_jwt_token(self) -> bool:
+        """Get JWT token from /v1/auth/token endpoint."""
+        try:
+            auth_payload = {
+                "bot_key": self.config.bot_id,  # Using bot_id as bot_key for now
+                "bootstrap_secret": getattr(self.config, 'bootstrap_secret', 'default_secret')
+            }
+            
+            async with self.session.post(
+                f"{self.config.main_server_url}/v1/auth/token",
+                json=auth_payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status == 200:
+                    auth_data = await response.json()
+                    self.access_token = auth_data["access_token"]
+                    logger.info("JWT token obtained successfully")
+                    return True
+                else:
+                    error_data = await response.json()
+                    logger.error(f"Failed to get JWT token: {error_data}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error getting JWT token: {e}")
+            return False
+    
     async def register_bot(self) -> bool:
-        """Register bot with main server."""
+        """Register bot with main server using JWT authentication and idempotency."""
         if not self.registration_breaker.can_execute():
             logger.warning("Registration circuit breaker is open")
             return False
         
         try:
+            # Step 1: Get JWT token
+            if not await self._get_jwt_token():
+                raise Exception("Failed to obtain JWT token")
+            
+            # Step 2: Prepare registration request
+            idempotency_key = str(uuid.uuid4())
+            
+            register_payload = {
+                "bot_key": self.config.bot_id,
+                "instance_id": self.instance_id,
+                "agent": {
+                    "version": "0.1.0",
+                    "platform": "linux/amd64"
+                },
+                "capabilities": {
+                    "operations": ["sum"],
+                    "max_concurrency": 1
+                }
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Idempotency-Key": idempotency_key,
+                "Content-Type": "application/json"
+            }
+            
+            # Step 3: Register with server
             async with self.session.post(
-                f"{self.config.main_server_url}/bots/register",
-                json={"bot_id": self.config.bot_id}
+                f"{self.config.main_server_url}/v1/bots/register",
+                json=register_payload,
+                headers=headers
             ) as response:
                 if response.status == 200:
+                    registration_data = await response.json()
+                    
+                    # Store session information
+                    session_info = registration_data.get("session", {})
+                    self.session_id = session_info.get("session_id")
+                    self.session_expires_in = session_info.get("expires_in_sec")
+                    self.heartbeat_interval = session_info.get("heartbeat_interval_sec")
+                    
                     logger.info(f"Bot {self.config.bot_id} registered successfully")
+                    logger.info(f"Session ID: {self.session_id}")
+                    logger.info(f"Session expires in: {self.session_expires_in}s")
+                    
                     self.registration_breaker.record_success()
                     return True
                 else:
