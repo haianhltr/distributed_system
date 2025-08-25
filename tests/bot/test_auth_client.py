@@ -112,7 +112,7 @@ class TestBotAuthClientHappy:
 
                 auth_client = AuthClient(auth_config, mock_session)
 
-                with patch('bots.auth_cli.ent.datetime') as mock_datetime:
+                with patch('bots.auth_client.datetime') as mock_datetime:
                     # Mock current time
                     current_time = datetime(2025, 8, 25, 10, 30, 0)
                     mock_datetime.fromisoformat.return_value = current_time
