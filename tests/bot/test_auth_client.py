@@ -1,6 +1,6 @@
         """Tests for Bot Auth Client (A1) functionality."""
 
-        import pytest
+import pytest
         import asyncio
         import json
         from datetime import datetime, timedelta
