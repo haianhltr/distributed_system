@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends
 
-from services import MetricsService
-from core.exceptions import ValidationError, service_error_handler
+from main_server.services import MetricsService
+from main_server.core.exceptions import ValidationError, service_error_handler
 from .dependencies import get_metrics_service
 
 

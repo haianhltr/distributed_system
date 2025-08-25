@@ -70,6 +70,29 @@ class DatabaseManager:
                     error TEXT
                 );
 
+                -- Auth tables for token-based authentication
+                CREATE TABLE IF NOT EXISTS auth_bots (
+                    bot_key TEXT PRIMARY KEY,
+                    bootstrap_secret_hash BYTEA NOT NULL,
+                    secret_version INTEGER NOT NULL DEFAULT 1,
+                    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS bot_auth_guard (
+                    bot_key TEXT PRIMARY KEY REFERENCES auth_bots(bot_key),
+                    failed_attempts INTEGER NOT NULL DEFAULT 0,
+                    last_failed_at TIMESTAMPTZ,
+                    locked_until TIMESTAMPTZ
+                );
+
+                CREATE TABLE IF NOT EXISTS revoked_jti (
+                    jti UUID PRIMARY KEY,
+                    bot_key TEXT NOT NULL REFERENCES auth_bots(bot_key),
+                    revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL
+                );
+
                 -- Indexes for performance
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
                 CREATE INDEX IF NOT EXISTS idx_jobs_claimed_by ON jobs(claimed_by);
@@ -83,6 +106,12 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_results_job_id ON results(job_id);
                 CREATE INDEX IF NOT EXISTS idx_results_processed_at ON results(processed_at);
                 CREATE INDEX IF NOT EXISTS idx_results_operation ON results(operation);
+
+                -- Auth table indexes
+                CREATE INDEX IF NOT EXISTS idx_auth_bots_enabled ON auth_bots(is_enabled);
+                CREATE INDEX IF NOT EXISTS idx_bot_auth_guard_locked_until ON bot_auth_guard(locked_until);
+                CREATE INDEX IF NOT EXISTS idx_revoked_jti_expires_at ON revoked_jti(expires_at);
+                CREATE INDEX IF NOT EXISTS idx_revoked_jti_bot_key ON revoked_jti(bot_key);
 
                 -- Ensure atomic job claiming
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_current_job ON bots(current_job_id) WHERE current_job_id IS NOT NULL;

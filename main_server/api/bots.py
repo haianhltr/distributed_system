@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, Header
 from datetime import datetime
 
-from models.schemas import BotRegister, BotHeartbeat, BotAssignOperation
-from services import BotService
-from core.exceptions import (
+from main_server.models.schemas import BotRegister, BotHeartbeat, BotAssignOperation
+from main_server.services import BotService
+from main_server.core.exceptions import (
     NotFoundError, ValidationError, ConflictError, 
     service_error_handler
 )

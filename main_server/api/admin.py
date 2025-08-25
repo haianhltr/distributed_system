@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, Depends
 
-from models.schemas import QueryRequest
-from services import AdminService
-from core.exceptions import (
+from main_server.models.schemas import QueryRequest
+from main_server.services import AdminService
+from main_server.core.exceptions import (
     ValidationError, BusinessRuleViolation, 
     service_error_handler
 )

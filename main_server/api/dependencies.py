@@ -5,12 +5,12 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from core.dependencies import get_dependencies
-from core.config import get_config
-from core.exceptions import AuthenticationError, service_error_handler
-from services import JobService, BotService, MetricsService, AdminService
-from database import DatabaseManager
-from datalake import DatalakeManager
+from main_server.core.dependencies import get_dependencies
+from main_server.core.config import get_config
+from main_server.core.exceptions import AuthenticationError, service_error_handler
+from main_server.services import JobService, BotService, MetricsService, AdminService
+from main_server.database import DatabaseManager
+from main_server.datalake import DatalakeManager
 
 
 security = HTTPBearer()

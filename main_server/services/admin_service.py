@@ -4,11 +4,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import structlog
 
-from database import DatabaseManager
-from repositories import create_unit_of_work
-from cleanup_service import CleanupScheduler
-from models.schemas import QueryRequest
-from core.exceptions import ValidationError, BusinessRuleViolation
+from main_server.database import DatabaseManager
+from main_server.repositories import create_unit_of_work
+from main_server.cleanup_service import CleanupScheduler
+from main_server.models.schemas import QueryRequest
+from main_server.core.exceptions import ValidationError, BusinessRuleViolation
 
 
 logger = structlog.get_logger(__name__)

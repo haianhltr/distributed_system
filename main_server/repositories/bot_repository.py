@@ -13,19 +13,30 @@ class BotRepository(BaseRepository):
     def table_name(self) -> str:
         return "bots"
     
-    async def register(self, bot_id: str) -> Dict[str, Any]:
+    async def register(self, bot_key: str, bot_id: str) -> Dict[str, Any]:
         """Register a new bot or reactivate existing one."""
         query = """
-            INSERT INTO bots (id, status, last_heartbeat_at, created_at)
-            VALUES ($1, 'idle', NOW(), NOW())
+            INSERT INTO bots (id, bot_key, status, last_heartbeat_at, created_at)
+            VALUES ($1, $2, 'idle', NOW(), NOW())
             ON CONFLICT (id) DO UPDATE SET
                 status = 'idle',
                 last_heartbeat_at = NOW(),
                 deleted_at = NULL
             RETURNING *
         """
-        row = await self.connection.fetchrow(query, bot_id)
+        row = await self.connection.fetchrow(query, bot_id, bot_key)
         return dict(row)
+    
+    async def find_by_bot_key(self, bot_key: str) -> Optional[Dict[str, Any]]:
+        """Find a bot by its bot_key."""
+        query = """
+            SELECT * FROM bots 
+            WHERE bot_key = $1 AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        row = await self.connection.fetchrow(query, bot_key)
+        return dict(row) if row else None
     
     async def update_heartbeat(self, bot_id: str) -> bool:
         """Update bot's last heartbeat timestamp."""

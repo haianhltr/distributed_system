@@ -1,14 +1,14 @@
 """Bot management business logic."""
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import structlog
 
-from database import DatabaseManager
-from repositories import create_unit_of_work
-from domain import Bot, BotStatus, Operation, ProcessingDuration
-from models.schemas import BotRegister, BotHeartbeat, BotAssignOperation
-from core.exceptions import NotFoundError, ValidationError, ConflictError, BusinessRuleViolation
+from main_server.database import DatabaseManager
+from main_server.repositories import create_unit_of_work
+from main_server.domain import Bot, BotStatus, Operation, ProcessingDuration
+from main_server.models.schemas import BotRegister, BotHeartbeat, BotAssignOperation
+from main_server.core.exceptions import NotFoundError, ValidationError, ConflictError, BusinessRuleViolation
 
 
 logger = structlog.get_logger(__name__)

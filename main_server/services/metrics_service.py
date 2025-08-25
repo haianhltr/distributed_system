@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Dict, Any
 import structlog
 
-from database import DatabaseManager
-from datalake import DatalakeManager
-from repositories import create_unit_of_work
-from core.exceptions import ValidationError
+from main_server.database import DatabaseManager
+from main_server.datalake import DatalakeManager
+from main_server.repositories import create_unit_of_work
+from main_server.core.exceptions import ValidationError
 
 
 logger = structlog.get_logger(__name__)

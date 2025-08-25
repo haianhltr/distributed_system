@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import asyncpg
 import structlog
-from database import DatabaseManager
+from main_server.database import DatabaseManager
 
 logger = structlog.get_logger(__name__)
 

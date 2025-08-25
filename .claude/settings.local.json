@@ -44,7 +44,8 @@
       "Bash(pip show:*)",
       "Bash(pytest:*)",
       "Bash(set PYTHONPATH=.)",
-      "Bash($env:PYTHONPATH=\".\")"
+      "Bash($env:PYTHONPATH=\".\")",
+      "Bash(PYTHONPATH=. pytest -v -s tests/bot/test_auth_client.py::TestBotAuthClientHappy::test_bot_obtains_access_token_happy)"
     ],
     "deny": []
   }
