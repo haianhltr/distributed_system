@@ -1,19 +1,19 @@
         """Tests for Bot Auth Client (A1) functionality."""
 
 import pytest
-        import asyncio
-        import json
-        from datetime import datetime, timedelta
-        from unittest.mock import AsyncMock, Mock, patch
-        from aiohttp import ClientSession, web
-        from aiohttp.test_utils import make_mocked_coro
-        import pprint
+import asyncio
+import json
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, Mock, patch
+from aiohttp import ClientSession, web
+from aiohttp.test_utils import make_mocked_coro
+import pprint
 
-        from bots.auth_client import AuthClient
-        from bots.exceptions import AuthenticationError, RateLimitError, BotClientError
+from bots.auth_client import AuthClient
+from bots.exceptions import AuthenticationError, RateLimitError, BotClientError
 
 
-        class TestBotAuthClientHappy:
+class TestBotAuthClientHappy:
             """Test successful authentication flows."""
 
             @pytest.fixture
