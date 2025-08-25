@@ -1,0 +1,125 @@
+(venv) PS C:\Users\truonl1\OneDrive - kochind.com\Desktop\Projects\Personal\distributed-system> pytest -v -s tests/bot/test_auth_client.py::TestBotAuthClientHappy::test_bot_stores_expiry_and_bearer_header_builder
+=========================================================================================================== test session starts ===========================================================================================================
+platform win32 -- Python 3.11.9, pytest-8.4.1, pluggy-1.6.0 -- C:\Users\truonl1\OneDrive - kochind.com\Desktop\Projects\Personal\distributed-system\venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\truonl1\OneDrive - kochind.com\Desktop\Projects\Personal\distributed-system
+configfile: pytest.ini
+plugins: asyncio-1.1.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1 item
+
+tests/bot/test_auth_client.py::TestBotAuthClientHappy::test_bot_stores_expiry_and_bearer_header_builder FAILED
+
+================================================================================================================ FAILURES =================================================================================================================
+_________________________________________________________________________________ TestBotAuthClientHappy.test_bot_stores_expiry_and_bearer_header_builder _________________________________________________________________________________
+
+self = <tests.bot.test_auth_client.TestBotAuthClientHappy object at 0x000001D367463C50>
+auth_config = {'auth_endpoint': 'http://localhost:8000/v1/auth/token', 'bootstrap_secret': 'test-secret-456', 'bot_key': 'test-bot-123', 'client_version': '1.0.0', ...}, mock_session = <AsyncMock spec='ClientSession' id='2007482402576'>
+success_response_data = {'access_token': 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...', 'expires_in': 900, 'issued_at': '2025-08-25T10:30:00Z', 'token_type': 'Bearer'}
+
+    @pytest.mark.asyncio
+    async def test_bot_stores_expiry_and_bearer_header_builder(self, auth_config, mock_session, success_response_data):
+        """Test token expiry calculation and header building."""
+
+        # Mock response with 120 second expiry
+        response_data = success_response_data.copy()
+        response_data["expires_in"] = 120
+        response_data["issued_at"] = "2025-08-25T10:30:00Z"
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = make_mocked_coro(response_data)
+        mock_session.post.return_value.__aenter__.return_value = mock_response
+
+        auth_client = AuthClient(auth_config, mock_session)
+
+>       with patch('bots.auth_cli.ent.datetime') as mock_datetime:
+
+tests\bot\test_auth_client.py:117:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1430: in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'bots.auth_cli.ent'
+
+    def resolve_name(name):
+        """
+        Resolve a name to an object.
+
+        It is expected that `name` will be a string in one of the following
+        formats, where W is shorthand for a valid Python identifier and dot stands
+        for a literal period in these pseudo-regexes:
+
+        W(.W)*
+        W(.W)*:(W(.W)*)?
+
+        The first form is intended for backward compatibility only. It assumes that
+        some part of the dotted name is a package, and the rest is an object
+        somewhere within that package, possibly nested inside other objects.
+        Because the place where the package stops and the object hierarchy starts
+        can't be inferred by inspection, repeated attempts to import must be done
+        with this form.
+
+        In the second form, the caller makes the division point clear through the
+        provision of a single colon: the dotted name to the left of the colon is a
+        package to be imported, and the dotted name to the right is the object
+        hierarchy within that package. Only one import is needed in this form. If
+        it ends with the colon, then a module object is returned.
+
+        The function will return an object (which might be a module), or raise one
+        of the following exceptions:
+
+        ValueError - if `name` isn't in a recognised format
+        ImportError - if an import failed when it shouldn't have
+        AttributeError - if a failure occurred when traversing the object hierarchy
+                         within the imported package to get to the desired object.
+        """
+        global _NAME_PATTERN
+        if _NAME_PATTERN is None:
+            # Lazy import to speedup Python startup time
+            import re
+            dotted_words = r'(?!\d)(\w+)(\.(?!\d)(\w+))*'
+            _NAME_PATTERN = re.compile(f'^(?P<pkg>{dotted_words})'
+                                       f'(?P<cln>:(?P<obj>{dotted_words})?)?$',
+                                       re.UNICODE)
+
+        m = _NAME_PATTERN.match(name)
+        if not m:
+            raise ValueError(f'invalid format: {name!r}')
+        gd = m.groupdict()
+        if gd.get('cln'):
+            # there is a colon - a one-step import is all that's needed
+            mod = importlib.import_module(gd['pkg'])
+            parts = gd.get('obj')
+            parts = parts.split('.') if parts else []
+        else:
+            # no colon - have to iterate to find the package boundary
+            parts = name.split('.')
+            modname = parts.pop(0)
+            # first part *must* be a module/package.
+            mod = importlib.import_module(modname)
+            while parts:
+                p = parts[0]
+                s = f'{modname}.{p}'
+                try:
+                    mod = importlib.import_module(s)
+                    parts.pop(0)
+                    modname = s
+                except ImportError:
+                    break
+        # if we reach this point, mod is the module, already imported, and
+        # parts is the list of parts in the object hierarchy to be traversed, or
+        # an empty list if just the module is wanted.
+        result = mod
+        for p in parts:
+>           result = getattr(result, p)
+                     ^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'bots' has no attribute 'auth_cli'
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\pkgutil.py:715: AttributeError
+========================================================================================================= short test summary info =========================================================================================================
+FAILED tests/bot/test_auth_client.py::TestBotAuthClientHappy::test_bot_stores_expiry_and_bearer_header_builder - AttributeError: module 'bots' has no attribute 'auth_cli'
+============================================================================================================ 1 failed in 0.67s ============================================================================================================
+(venv) PS C:\Users\truonl1\OneDrive - kochind.com\Desktop\Projects\Personal\distributed-system>
